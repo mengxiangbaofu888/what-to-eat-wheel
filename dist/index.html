@@ -1,0 +1,3057 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>吃啥转盘 · 今天吃啥交给它</title>
+<meta name="description" content="自定义菜名、拍照识别食堂菜品、按大类/小项挑菜，转盘随机决定今天吃什么。">
+<meta name="theme-color" content="#151221">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23ff8a3d'/%3E%3Cpath d='M32 32 L32 4 A28 28 0 0 1 56.2 18 Z' fill='%23ffd166'/%3E%3Cpath d='M32 32 L56.2 18 A28 28 0 0 1 56.2 46 Z' fill='%23ef476f'/%3E%3Cpath d='M32 32 L56.2 46 A28 28 0 0 1 32 60 Z' fill='%2306d6a0'/%3E%3Cpath d='M32 32 L32 60 A28 28 0 0 1 7.8 46 Z' fill='%234cc9f0'/%3E%3Cpath d='M32 32 L7.8 46 A28 28 0 0 1 7.8 18 Z' fill='%23845ec2'/%3E%3Cpath d='M32 32 L7.8 18 A28 28 0 0 1 32 4 Z' fill='%23f78c6b'/%3E%3Ccircle cx='32' cy='32' r='7' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   吃啥转盘 · 样式
+   ============================================================ */
+
+:root {
+  --bg: #151221;
+  --bg-2: #1e1930;
+  --card: rgba(255, 255, 255, 0.06);
+  --card-solid: #221c36;
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #f4f1ff;
+  --text-dim: #a99fc4;
+  --brand: #ff8a3d;
+  --brand-2: #ffd166;
+  --accent: #8b5cf6;
+  --ok: #06d6a0;
+  --danger: #ef476f;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #fdf7f1;
+  --bg-2: #ffffff;
+  --card: rgba(28, 20, 10, 0.04);
+  --card-solid: #ffffff;
+  --line: rgba(40, 25, 10, 0.12);
+  --text: #241a12;
+  --text-dim: #8a7a6b;
+  --brand: #f4741f;
+  --brand-2: #f5b301;
+  --accent: #6d38e0;
+  --shadow: 0 10px 26px rgba(120, 80, 40, 0.16);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/*
+ * 必须放在最前面，而且必须带 !important。
+ * 浏览器的默认样式里 `[hidden] { display: none }` 只是一个**元素选择器**；
+ * 我们后面写了 `.modal-mask { display: grid }` 这种类选择器，优先级更高，
+ * 会把 hidden 直接压掉——结果就是遮罩从一开始就一直盖在整个界面上，
+ * 里面还是个空弹窗，点哪儿都没反应，看起来就像「一打开就卡死」。
+ * （这个坑 jsdom 测不出来，因为 jsdom 不做完整的 CSS 层叠。）
+ */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background:
+    radial-gradient(1100px 700px at 12% -8%, rgba(255, 138, 61, 0.20), transparent 60%),
+    radial-gradient(900px 620px at 100% 0%, rgba(139, 92, 246, 0.22), transparent 55%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans SC', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: calc(8px + var(--safe-t)) 12px calc(8px + var(--safe-b));
+  gap: 8px;
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 2px 2px 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.5px;
+}
+.brand-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: conic-gradient(var(--brand), var(--brand-2), var(--ok), var(--accent), var(--brand));
+  box-shadow: 0 0 12px rgba(255, 138, 61, 0.7);
+}
+.top-actions { display: flex; gap: 6px; }
+
+.icon-btn {
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+.icon-btn:active { transform: scale(0.92); }
+
+/* ---------------- 转盘区 ---------------- */
+
+.stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.wheel-wrap {
+  position: relative;
+  width: min(78vw, 42vh, 420px);
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+#wheel {
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: drop-shadow(0 14px 30px rgba(0, 0, 0, 0.35));
+  touch-action: manipulation;
+}
+
+.pointer {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 13px solid transparent;
+  border-right: 13px solid transparent;
+  border-top: 26px solid var(--brand);
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
+  z-index: 3;
+  pointer-events: none;
+}
+
+.spin-btn {
+  position: absolute;
+  width: 26%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.85);
+  background: radial-gradient(circle at 35% 30%, #fff5e6, #ffb457 55%, #ff7a1a);
+  color: #4a2400;
+  font-weight: 800;
+  display: grid;
+  place-content: center;
+  gap: 0;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 4;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), inset 0 -3px 8px rgba(160, 80, 0, 0.25);
+  transition: transform 0.12s;
+  user-select: none;
+}
+.spin-btn:active { transform: scale(0.94); }
+.spin-btn[disabled] { filter: grayscale(0.6) brightness(0.85); cursor: not-allowed; }
+.spin-btn-main { font-size: clamp(18px, 4.6vmin, 30px); }
+.spin-btn-sub { font-size: clamp(9px, 1.6vmin, 12px); opacity: 0.7; font-weight: 600; margin-top: 2px; }
+
+/* ---------------- 结果区 ---------------- */
+
+.result-bar {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 560px;
+  text-align: center;
+  min-height: 30px;
+}
+.result-empty { color: var(--text-dim); font-size: 13px; }
+.result-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 12px 10px;
+  backdrop-filter: blur(10px);
+  animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.5, 1);
+}
+@keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.result-label { font-size: 11px; color: var(--text-dim); letter-spacing: 2px; }
+.result-name {
+  font-size: clamp(20px, 5.2vmin, 30px);
+  font-weight: 800;
+  background: linear-gradient(92deg, var(--brand), var(--brand-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  word-break: break-all;
+}
+.result-cat { font-size: 12px; color: var(--text-dim); margin-top: -2px; }
+.result-actions { display: flex; gap: 8px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+
+.history { margin-top: 6px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.history-chip {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* ---------------- 面板 ---------------- */
+
+.panel {
+  flex: 0 0 auto;
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.tabs { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--line); }
+.tab {
+  flex: 1;
+  padding: 10px 4px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  font-family: inherit;
+}
+.tab.active { color: var(--text); }
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 18%; right: 18%; bottom: 0; height: 2.5px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+}
+
+.tab-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.pane { display: none; padding: 10px; }
+.pane.active { display: block; }
+
+/* ---------------- 控件 ---------------- */
+
+.input {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+:root[data-theme='light'] .input { background: rgba(255, 255, 255, 0.8); }
+.input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.16); }
+select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 30px; }
+
+.btn {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.12s, filter 0.15s;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.96); }
+.btn.primary { background: linear-gradient(135deg, var(--brand), #ff6a2b); border-color: transparent; color: #fff; }
+.btn.ghost { background: transparent; }
+.btn.tiny { padding: 5px 10px; font-size: 12px; border-radius: 999px; font-weight: 500; }
+.btn.sm { padding: 6px 11px; font-size: 12.5px; }
+.btn.danger { color: var(--danger); border-color: rgba(239, 71, 111, 0.4); }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.row { display: flex; gap: 8px; align-items: center; }
+.row > .input { flex: 1; }
+.spacer { flex: 1; }
+.add-row { display: flex; gap: 8px; }
+.add-row .input { flex: 1; }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+
+.field { margin-bottom: 12px; }
+.label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; font-weight: 600; }
+.hint { font-size: 11.5px; color: var(--text-dim); margin-top: 5px; line-height: 1.45; }
+.sep { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+.mono { font-variant-numeric: tabular-nums; }
+
+.check { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; font-size: 13.5px; user-select: none; }
+input[type='checkbox'] {
+  appearance: none;
+  width: 19px; height: 19px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  border: 1.5px solid var(--line);
+  background: rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+}
+input[type='checkbox']:checked { background: linear-gradient(135deg, var(--brand), #ff6a2b); border-color: transparent; }
+input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute; left: 6px; top: 2.5px;
+  width: 4px; height: 9px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+input[type='checkbox']:indeterminate { background: var(--accent); border-color: transparent; }
+input[type='checkbox']:indeterminate::after {
+  content: ''; position: absolute; left: 4px; top: 7.5px; width: 9px; height: 2px; background: #fff; border-radius: 2px;
+}
+
+.range-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-dim); margin-top: 6px; }
+.range-row input[type='range'] { flex: 1; accent-color: var(--brand); }
+
+/* ---------------- 分类列表 ---------------- */
+
+.cat-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.cat-group { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; background: rgba(255, 255, 255, 0.03); }
+:root[data-theme='light'] .cat-group { background: rgba(255, 255, 255, 0.7); }
+.cat-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255, 255, 255, 0.04); cursor: pointer; }
+:root[data-theme='light'] .cat-head { background: rgba(0, 0, 0, 0.03); }
+.cat-name { font-weight: 700; font-size: 13.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.chev { transition: transform 0.2s; color: var(--text-dim); font-size: 11px; }
+.cat-group.collapsed .chev { transform: rotate(-90deg); }
+.cat-group.collapsed .cat-items { display: none; }
+.cat-items { display: flex; flex-direction: column; }
+.cat-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--line); }
+.cat-item:hover { background: rgba(255, 255, 255, 0.03); }
+.item-name { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.cat-item.off .item-name { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--line); }
+.mini {
+  border: none; background: transparent; color: var(--text-dim);
+  font-size: 12px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-family: inherit;
+}
+.mini:hover { background: var(--card); color: var(--text); }
+.mini.danger:hover { color: var(--danger); }
+.empty-tip { text-align: center; color: var(--text-dim); font-size: 12.5px; padding: 18px 10px; line-height: 1.7; }
+
+/* ---------------- 拍照识别 ---------------- */
+
+.photo-drop {
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 18px 14px;
+  text-align: center;
+}
+.photo-drop-icon { font-size: 30px; }
+.photo-drop-title { font-weight: 700; margin-top: 4px; }
+.photo-drop-sub { font-size: 12px; color: var(--text-dim); margin: 4px 0 12px; }
+.photo-btns { display: flex; gap: 8px; justify-content: center; }
+
+.photo-preview { display: flex; gap: 8px; margin-top: 10px; overflow-x: auto; padding-bottom: 4px; }
+.photo-preview img { height: 84px; border-radius: 10px; border: 1px solid var(--line); flex: 0 0 auto; }
+
+.status { margin-top: 10px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.status.err { color: var(--danger); }
+.status.ok { color: var(--ok); }
+.spinner {
+  width: 14px; height: 14px; flex: 0 0 auto;
+  border: 2px solid var(--line); border-top-color: var(--brand);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.recognized { margin-top: 10px; }
+.rec-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
+.rec-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rec-row .input { padding: 6px 9px; font-size: 13px; }
+.rec-name { flex: 1.4; }
+.rec-cat { flex: 1; }
+.rec-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* ---------------- 弹窗 / 提示 ---------------- */
+
+.modal-mask {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  display: grid; place-items: center;
+  padding: 20px;
+  animation: fade 0.15s;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  width: 100%; max-width: 400px;
+  background: var(--card-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+  max-height: 84vh; overflow-y: auto;
+  animation: pop 0.22s cubic-bezier(0.2, 1.3, 0.5, 1);
+}
+.modal h3 { margin: 0 0 10px; font-size: 16px; }
+.modal p { margin: 0 0 10px; font-size: 13.5px; color: var(--text-dim); line-height: 1.65; }
+.modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.modal .field:last-child { margin-bottom: 0; }
+.modal ul { margin: 0 0 10px; padding-left: 18px; font-size: 13.5px; color: var(--text-dim); line-height: 1.75; }
+.modal code { background: var(--card); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+
+.toast-wrap {
+  position: fixed; left: 0; right: 0; bottom: calc(18px + var(--safe-b));
+  z-index: 120; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none;
+}
+.toast {
+  background: rgba(20, 15, 30, 0.94);
+  color: #fff;
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  max-width: 86vw;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: toastIn 0.22s ease-out;
+}
+.toast.err { background: rgba(120, 20, 45, 0.96); }
+.toast.ok { background: rgba(6, 90, 70, 0.96); }
+@keyframes toastIn { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 110; }
+
+/* ---------------- 宽屏 ---------------- */
+
+@media (min-width: 900px) {
+  .app {
+    display: grid;
+    grid-template-columns: minmax(360px, 1fr) minmax(380px, 1.05fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'top top' 'stage panel';
+    gap: 14px 22px;
+    padding: 14px 20px;
+  }
+  .topbar { grid-area: top; }
+  .stage { grid-area: stage; }
+  .panel { grid-area: panel; max-height: none; height: 100%; }
+  .wheel-wrap { width: min(38vw, 460px); }
+  .result-bar { max-width: 100%; }
+}
+
+@media (min-width: 1260px) {
+  .app { grid-template-columns: minmax(420px, 1fr) minmax(440px, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-dot"></span>吃啥转盘</div>
+    <div class="top-actions">
+      <button class="icon-btn" id="btn-theme" title="切换主题" aria-label="切换主题">🌗</button>
+      <button class="icon-btn" id="btn-help" title="使用说明" aria-label="使用说明">？</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="wheel-wrap">
+      <div class="pointer" aria-hidden="true"></div>
+      <canvas id="wheel" aria-label="选择转盘"></canvas>
+      <button class="spin-btn" id="btn-spin" aria-label="开始转动">
+        <span class="spin-btn-main">转</span>
+        <span class="spin-btn-sub" id="spin-sub">0 个</span>
+      </button>
+    </div>
+
+    <div class="result-bar" id="result-bar">
+      <div class="result-empty" id="result-empty">转一下，让天意决定今天吃啥 🍚</div>
+      <div class="result-card" id="result-card" hidden>
+        <div class="result-label">今天就吃</div>
+        <div class="result-name" id="result-name">—</div>
+        <div class="result-cat" id="result-cat"></div>
+        <div class="result-actions">
+          <button class="btn ghost sm" id="btn-again">再转一次</button>
+          <button class="btn ghost sm" id="btn-drop">从转盘移除</button>
+        </div>
+      </div>
+      <div class="history" id="history"></div>
+    </div>
+  </main>
+
+  <section class="panel">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="food" role="tab">🍽 菜品</button>
+      <button class="tab" data-tab="photo" role="tab">📷 拍照识别</button>
+      <button class="tab" data-tab="settings" role="tab">⚙️ 设置</button>
+    </nav>
+
+    <div class="tab-body">
+
+      <!-- ============ 菜品 ============ -->
+      <div class="pane active" data-pane="food">
+        <div class="add-row">
+          <input id="add-input" class="input" type="text" placeholder="输入菜名，回车添加（可粘贴多行，一行一个）" autocomplete="off">
+          <button class="btn primary" id="btn-add">添加</button>
+        </div>
+        <div class="chip-row">
+          <button class="btn tiny" id="btn-smart" title="按菜名后缀自动分大类，例如「麻辣鸡丁滑蛋饭 / 五花肉滑蛋饭」→ 大类「滑蛋饭」">✨ 智能归类</button>
+          <button class="btn tiny" id="btn-all">全选</button>
+          <button class="btn tiny" id="btn-none">全不选</button>
+          <button class="btn tiny" id="btn-invert">反选</button>
+          <span class="spacer"></span>
+          <button class="btn tiny danger" id="btn-clear">清空</button>
+        </div>
+        <div class="cat-list" id="cat-list"></div>
+      </div>
+
+      <!-- ============ 拍照识别 ============ -->
+      <div class="pane" data-pane="photo">
+        <div class="photo-drop" id="photo-drop">
+          <div class="photo-drop-icon">📷</div>
+          <div class="photo-drop-title">拍一张食堂菜牌 / 餐盘照片</div>
+          <div class="photo-drop-sub">自动识别上面有什么菜，确认后加进转盘</div>
+          <div class="photo-btns">
+            <button class="btn primary" id="btn-camera">拍照</button>
+            <button class="btn ghost" id="btn-album">从相册选</button>
+          </div>
+        </div>
+        <input id="file-camera" type="file" accept="image/*" capture="environment" hidden>
+        <input id="file-album" type="file" accept="image/*" multiple hidden>
+
+        <div class="photo-preview" id="photo-preview" hidden></div>
+        <div class="status" id="photo-status" hidden></div>
+        <div class="recognized" id="recognized" hidden></div>
+      </div>
+
+      <!-- ============ 设置 ============ -->
+      <div class="pane" data-pane="settings">
+        <div class="field">
+          <label class="label" for="set-provider">视觉模型服务商</label>
+          <select class="input" id="set-provider"></select>
+          <div class="hint" id="provider-hint"></div>
+        </div>
+        <div class="field">
+          <label class="label" for="set-baseurl">接口地址（base URL）</label>
+          <input class="input" id="set-baseurl" type="text" spellcheck="false" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+        </div>
+        <div class="field">
+          <label class="label" for="set-model">模型名</label>
+          <input class="input" id="set-model" type="text" spellcheck="false" placeholder="qwen-vl-max">
+        </div>
+        <div class="field">
+          <label class="label" for="set-apikey">API Key</label>
+          <div class="row">
+            <input class="input" id="set-apikey" type="password" spellcheck="false" placeholder="sk-...">
+            <button class="btn ghost" id="btn-eye" title="显示/隐藏">👁</button>
+          </div>
+          <div class="hint">Key 只存在你这台设备的本地存储里，不会上传到任何别的地方。</div>
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="set-proxy"> <span>通过本地代理请求（推荐，用 <code>npm run serve</code> 打开时能彻底绕开浏览器跨域）</span></label>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btn-test">测试连接</button>
+          <button class="btn ghost" id="btn-save-vision">保存</button>
+        </div>
+
+        <hr class="sep">
+
+        <div class="field">
+          <label class="label">转盘</label>
+          <label class="check"><input type="checkbox" id="set-sound"> <span>转动时播放音效</span></label>
+          <label class="check"><input type="checkbox" id="set-remove"> <span>抽中后自动从转盘移除</span></label>
+          <label class="check"><input type="checkbox" id="set-confetti"> <span>抽中后撒花</span></label>
+          <div class="range-row">
+            <span>转动时长</span>
+            <input type="range" id="set-duration" min="2" max="10" step="0.5">
+            <span id="set-duration-val" class="mono">4.5s</span>
+          </div>
+        </div>
+
+        <hr class="sep">
+
+        <div class="field">
+          <label class="label">数据</label>
+          <div class="chip-row">
+            <button class="btn tiny" id="btn-export">导出备份</button>
+            <button class="btn tiny" id="btn-import">导入备份</button>
+            <button class="btn tiny" id="btn-copy">复制数据</button>
+            <button class="btn tiny danger" id="btn-reset">恢复出厂</button>
+          </div>
+          <div class="hint" id="stat-hint"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</div>
+
+<div class="modal-mask" id="modal-mask" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+</div>
+<div class="toast-wrap" id="toast-wrap"></div>
+<canvas id="confetti" class="confetti" hidden></canvas>
+<input id="file-import" type="file" accept=".json,application/json" hidden>
+
+<script>
+/* ===== util.js ===== */
+/* ============================================================
+   util.js · 通用小工具（无依赖，挂到 window.W.Util）
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = (global.W = global.W || {});
+
+  var seq = 0;
+  function uid(prefix) {
+    seq += 1;
+    return (prefix || 'id') + '_' + Date.now().toString(36) + '_' + seq.toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function clamp(v, min, max) { return v < min ? min : v > max ? max : v; }
+
+  /** 极简 hyperscript，避免到处 innerHTML 拼接 */
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    if (attrs) {
+      if (attrs.type) node.setAttribute('type', attrs.type);
+      Object.keys(attrs).forEach(function (k) {
+        var v = attrs[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === 'type') return;
+        if (k === 'class' || k === 'className') { node.className = v; return; }
+        if (k === 'text') { node.textContent = v; return; }
+        if (k === 'html') { node.innerHTML = v; return; }
+        if (k === 'dataset') { Object.keys(v).forEach(function (d) { node.dataset[d] = v[d]; }); return; }
+        if (k === 'style' && typeof v === 'object') { Object.assign(node.style, v); return; }
+        if (k.slice(0, 2) === 'on' && typeof v === 'function') { node.addEventListener(k.slice(2).toLowerCase(), v); return; }
+        if (k === 'value') { node.value = v; return; }
+        if (k === 'checked' || k === 'disabled' || k === 'hidden' || k === 'indeterminate') { node[k] = !!v; return; }
+        if (v === true) { node.setAttribute(k, ''); return; }
+        node.setAttribute(k, String(v));
+      });
+    }
+    append(node, children);
+    return node;
+  }
+
+  function append(node, children) {
+    if (children === null || children === undefined || children === false) return;
+    if (Array.isArray(children)) { children.forEach(function (c) { append(node, c); }); return; }
+    node.appendChild(typeof children === 'object' ? children : document.createTextNode(String(children)));
+  }
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+  function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); return node; }
+
+  function show(node, visible) { if (node) node.hidden = !visible; }
+
+  function debounce(fn, ms) {
+    var t = null;
+    return function () {
+      var args = arguments, self = this;
+      if (t) clearTimeout(t);
+      t = setTimeout(function () { t = null; fn.apply(self, args); }, ms || 200);
+    };
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ------------------------- 本地存储（带降级） ------------------------- */
+
+  var memory = {};
+  var lsOk = (function () {
+    try {
+      var k = '__wtw_test__';
+      global.localStorage.setItem(k, '1');
+      global.localStorage.removeItem(k);
+      return true;
+    } catch (e) { return false; }
+  })();
+
+  var storage = {
+    ok: lsOk,
+    get: function (key, def) {
+      try {
+        var raw = lsOk ? global.localStorage.getItem(key) : memory[key];
+        return raw === null || raw === undefined ? def : JSON.parse(raw);
+      } catch (e) { return def; }
+    },
+    set: function (key, value) {
+      var raw = JSON.stringify(value);
+      try {
+        if (lsOk) global.localStorage.setItem(key, raw); else memory[key] = raw;
+      } catch (e) {
+        memory[key] = raw;
+        if (!storage.warned) {
+          storage.warned = true;
+          W.UI && W.UI.toast && W.UI.toast('本地存储写入失败，本次数据只保留在当前页面', 'err');
+        }
+      }
+    },
+    remove: function (key) {
+      try { if (lsOk) global.localStorage.removeItem(key); } catch (e) { /* ignore */ }
+      delete memory[key];
+    },
+  };
+
+  /* ------------------------- 文件读写 ------------------------- */
+
+  function download(filename, text, mime) {
+    var blob = new global.Blob([text], { type: mime || 'application/json;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = el('a', { href: url, download: filename });
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+
+  function readTextFile(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result)); };
+      fr.onerror = function () { reject(fr.error || new Error('读取文件失败')); };
+      fr.readAsText(file, 'utf-8');
+    });
+  }
+
+  function readDataURL(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result)); };
+      fr.onerror = function () { reject(fr.error || new Error('读取图片失败')); };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  /** 压缩图片：长边不超过 maxSize，输出 jpeg dataURL（拍照识别省流量、提速） */
+  function compressImage(file, maxSize, quality) {
+    maxSize = maxSize || 1280;
+    quality = quality || 0.85;
+    return readDataURL(file).then(function (dataUrl) {
+      return new Promise(function (resolve) {
+        var img = new Image();
+        img.onload = function () {
+          var w = img.naturalWidth, h = img.naturalHeight;
+          if (!w || !h) { resolve(dataUrl); return; }
+          var scale = Math.min(1, maxSize / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale));
+          var ch = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = cw; canvas.height = ch;
+          var ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, cw, ch);
+          ctx.drawImage(img, 0, 0, cw, ch);
+          try { resolve(canvas.toDataURL('image/jpeg', quality)); }
+          catch (e) { resolve(dataUrl); }
+        };
+        img.onerror = function () { resolve(dataUrl); };
+        img.src = dataUrl;
+      });
+    });
+  }
+
+  function pickFile(input) {
+    return new Promise(function (resolve) {
+      function onChange() {
+        input.removeEventListener('change', onChange);
+        resolve(Array.prototype.slice.call(input.files || []));
+        input.value = '';
+      }
+      input.addEventListener('change', onChange);
+      input.click();
+    });
+  }
+
+  function formatTime(ts) {
+    var d = new Date(ts);
+    function p(n) { return n < 10 ? '0' + n : String(n); }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  /** 文件名里的时间戳：20261005-2330 */
+  function stamp() {
+    var d = new Date();
+    function p(n) { return n < 10 ? '0' + n : String(n); }
+    return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  /** 稳定配色：黄金角撒点，相邻扇区颜色差异大 */
+  function paletteColor(i, total, saturation, lightness) {
+    var hue = (i * 137.508) % 360;
+    if (total && total > 1) {
+      // 少量扇区时均分色相，视觉上更规整
+      var even = (360 / total) * i;
+      hue = total <= 12 ? even : hue;
+    }
+    var s = saturation === undefined ? 62 : saturation;
+    var l = lightness === undefined ? 58 : lightness;
+    if (i % 2 === 1) l -= 8;
+    return 'hsl(' + hue.toFixed(1) + ' ' + s + '% ' + l + '%)';
+  }
+
+  W.Util = {
+    uid: uid, clamp: clamp, el: el, append: append, $: $, $$: $$, clear: clear, show: show,
+    debounce: debounce, escapeHtml: escapeHtml, storage: storage, download: download,
+    readTextFile: readTextFile, readDataURL: readDataURL, compressImage: compressImage,
+    pickFile: pickFile, formatTime: formatTime, stamp: stamp, paletteColor: paletteColor,
+  };
+})(window);
+
+/* ===== store.js ===== */
+/* ============================================================
+   store.js · 数据和本地持久化
+   数据结构：
+     categories: [{ id, name, collapsed }]        大类（例如「滑蛋饭」）
+     items:      [{ id, name, categoryId, enabled, createdAt }]   具体菜品
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = (global.W = global.W || {});
+  var U = W.Util;
+
+  var KEY = 'whatToEatWheel.v1';
+  var HISTORY_MAX = 10;
+
+  var PROVIDERS = [
+    {
+      id: 'zhipu',
+      name: '智谱 AI · GLM-4.6V-Flash（免费）',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      model: 'glm-4.6v-flash',
+      hint: '学生党首选：glm-4.6v-flash 目前完全免费，识别食堂菜牌够用。要更准可换 glm-5v-turbo / glm-4.6v。',
+    },
+    {
+      id: 'siliconflow',
+      name: '硅基流动 SiliconFlow（有免费模型）',
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      model: 'Qwen/Qwen3.5-4B',
+      hint: 'Qwen/Qwen3.5-4B 免费且支持图片输入；模型名要写全，例如 Qwen/Qwen3.5-4B。',
+    },
+    {
+      id: 'dashscope',
+      name: '阿里云百炼 · 通义千问',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3-vl-plus',
+      hint: '新用户每个模型送 100 万 token（90 天）。视觉模型可选 qwen3-vl-plus / qwen3-vl-flash / qwen-vl-max，以控制台为准。',
+    },
+    {
+      id: 'doubao',
+      name: '火山方舟 · 豆包',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      model: 'doubao-seed-1-6-vision-250815',
+      hint: '新用户每个模型 50 万 token。模型名通常要填控制台里的「接入点 ID」（ep-xxxxxxxx）或模型名。',
+    },
+    {
+      id: 'moonshot',
+      name: '月之暗面 Kimi',
+      baseUrl: 'https://api.moonshot.cn/v1',
+      model: 'kimi-k3',
+      hint: '视觉模型 kimi-k3。注意 Kimi 只认 base64 图片，不接受公网图片链接——本应用正好就是传 base64，没问题。',
+    },
+    {
+      id: 'gemini',
+      name: 'Google Gemini（有免费额度）',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      model: 'gemini-3.8-flash',
+      hint: '走 Gemini 的 OpenAI 兼容层。国内直连通常需要自备中转，免费层的数据会被用于训练。',
+    },
+    {
+      id: 'openai',
+      name: 'OpenAI',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-5.2',
+      hint: '没有免费额度；国内直连不通时需要自备中转地址。',
+    },
+    {
+      id: 'custom',
+      name: '自定义（任何 OpenAI 兼容接口）',
+      baseUrl: '',
+      model: '',
+      hint: '只要接口兼容 OpenAI 的 /chat/completions 且支持图片输入即可，本地跑的模型（Ollama / LM Studio 等）也能填。',
+    },
+  ];
+
+  var DEFAULT_SETTINGS = {
+    theme: 'auto',
+    sound: true,
+    removeAfterPick: false,
+    confetti: true,
+    duration: 4.5,
+    vision: {
+      provider: 'zhipu',
+      baseUrl: PROVIDERS[0].baseUrl,
+      model: PROVIDERS[0].model,
+      apiKey: '',
+      useProxy: false,
+    },
+  };
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function mergeSettings(raw) {
+    var s = clone(DEFAULT_SETTINGS);
+    if (raw && typeof raw === 'object') {
+      Object.keys(raw).forEach(function (k) {
+        if (k === 'vision' && raw.vision && typeof raw.vision === 'object') {
+          Object.keys(raw.vision).forEach(function (vk) { s.vision[vk] = raw.vision[vk]; });
+        } else if (raw[k] !== undefined) {
+          s[k] = raw[k];
+        }
+      });
+    }
+    return s;
+  }
+
+  function defaultData() {
+    return { version: 1, categories: [], items: [], history: [], settings: clone(DEFAULT_SETTINGS), seeded: false };
+  }
+
+  /** 首次打开给几道示例菜，好让人一眼看懂「大类 / 小项」怎么用 */
+  function seed(data) {
+    var demo = [
+      { cat: '滑蛋饭', items: ['麻辣鸡丁滑蛋饭', '五花肉滑蛋饭', '番茄滑蛋饭'] },
+      { cat: '面食', items: ['兰州牛肉面', '番茄鸡蛋面'] },
+      { cat: '', items: ['黄焖鸡米饭', '麻辣香锅'] },
+    ];
+    demo.forEach(function (g) {
+      var catId = null;
+      if (g.cat) catId = api.addCategory(g.cat, true).id;
+      g.items.forEach(function (name) { api.addItem(name, catId, true); });
+    });
+    data.seeded = true;
+  }
+
+  /* ------------------------------ 事件 ------------------------------ */
+
+  var listeners = [];
+  function emit() { listeners.forEach(function (fn) { try { fn(data); } catch (e) { console.error(e); } }); }
+
+  var saveTimer = null;
+  function save(immediate) {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (immediate) { U.storage.set(KEY, data); return; }
+    saveTimer = setTimeout(function () { saveTimer = null; U.storage.set(KEY, data); }, 250);
+  }
+
+  var data = defaultData();
+
+  function normalizeItem(it) {
+    return {
+      id: it.id || U.uid('it'),
+      name: String(it.name || '').trim(),
+      categoryId: it.categoryId || null,
+      enabled: it.enabled !== false,
+      createdAt: it.createdAt || Date.now(),
+    };
+  }
+
+  function normalizeCategory(c) {
+    return { id: c.id || U.uid('cat'), name: String(c.name || '').trim(), collapsed: !!c.collapsed };
+  }
+
+  var api = {
+    PROVIDERS: PROVIDERS,
+    KEY: KEY,
+
+    get data() { return data; },
+    get settings() { return data.settings; },
+
+    on: function (fn) { listeners.push(fn); return function () { listeners = listeners.filter(function (f) { return f !== fn; }); }; },
+    emit: emit,
+    save: save,
+
+    load: function () {
+      var raw = U.storage.get(KEY, null);
+      data = defaultData();
+      if (raw && typeof raw === 'object') {
+        if (Array.isArray(raw.items)) data.items = raw.items.map(normalizeItem).filter(function (i) { return i.name; });
+        if (Array.isArray(raw.categories)) data.categories = raw.categories.map(normalizeCategory).filter(function (c) { return c.name; });
+        if (Array.isArray(raw.history)) data.history = raw.history.slice(0, HISTORY_MAX);
+        data.settings = mergeSettings(raw.settings);
+        data.seeded = !!raw.seeded;
+      }
+      // 清理指向已不存在大类的条目
+      var ids = {};
+      data.categories.forEach(function (c) { ids[c.id] = 1; });
+      data.items.forEach(function (i) { if (i.categoryId && !ids[i.categoryId]) i.categoryId = null; });
+
+      if (!data.seeded && !data.items.length) {
+        seed(data);
+        save(true);
+      }
+      return data;
+    },
+
+    /* ------------------------------ 大类 ------------------------------ */
+
+    findCategory: function (id) {
+      for (var i = 0; i < data.categories.length; i++) if (data.categories[i].id === id) return data.categories[i];
+      return null;
+    },
+
+    categoryByName: function (name) {
+      name = String(name || '').trim();
+      if (!name) return null;
+      for (var i = 0; i < data.categories.length; i++) if (data.categories[i].name === name) return data.categories[i];
+      return null;
+    },
+
+    addCategory: function (name, silent) {
+      name = String(name || '').trim();
+      if (!name) return null;
+      var exist = api.categoryByName(name);
+      if (exist) return exist;
+      var cat = { id: U.uid('cat'), name: name, collapsed: false };
+      data.categories.push(cat);
+      if (!silent) { save(); emit(); }
+      return cat;
+    },
+
+    renameCategory: function (id, name) {
+      var cat = api.findCategory(id);
+      name = String(name || '').trim();
+      if (!cat || !name) return false;
+      var other = api.categoryByName(name);
+      if (other && other.id !== id) {
+        // 重名 → 合并
+        api.mergeCategory(id, other.id);
+        return true;
+      }
+      cat.name = name;
+      save(); emit();
+      return true;
+    },
+
+    /** 把 fromId 大类下的条目并入 intoId，然后删掉 fromId */
+    mergeCategory: function (fromId, intoId) {
+      if (fromId === intoId) return;
+      var cat = api.findCategory(fromId);
+      if (!cat) return;
+      data.items.forEach(function (i) { if (i.categoryId === fromId) i.categoryId = intoId; });
+      data.categories = data.categories.filter(function (c) { return c.id !== fromId; });
+      save(); emit();
+    },
+
+    removeCategory: function (id, mode) {
+      var cat = api.findCategory(id);
+      if (!cat) return;
+      if (mode === 'delete') {
+        data.items = data.items.filter(function (i) { return i.categoryId !== id; });
+      } else {
+        data.items.forEach(function (i) { if (i.categoryId === id) i.categoryId = null; });
+      }
+      data.categories = data.categories.filter(function (c) { return c.id !== id; });
+      save(); emit();
+    },
+
+    toggleCollapse: function (id) {
+      if (!id) { // 「未分类」这个虚拟分组
+        data.uncategorizedCollapsed = !data.uncategorizedCollapsed;
+        save(); emit();
+        return;
+      }
+      var cat = api.findCategory(id);
+      if (!cat) return;
+      cat.collapsed = !cat.collapsed;
+      save(); emit();
+    },
+
+    /* ------------------------------ 条目 ------------------------------ */
+
+    findItem: function (id) {
+      for (var i = 0; i < data.items.length; i++) if (data.items[i].id === id) return data.items[i];
+      return null;
+    },
+
+    itemByName: function (name) {
+      name = String(name || '').trim();
+      for (var i = 0; i < data.items.length; i++) if (data.items[i].name === name) return data.items[i];
+      return null;
+    },
+
+    addItem: function (name, categoryId, silent) {
+      name = String(name || '').trim().replace(/\s+/g, ' ');
+      if (!name) return null;
+      var exist = api.itemByName(name);
+      if (exist) {
+        if (categoryId && !exist.categoryId) exist.categoryId = categoryId;
+        if (!silent) { save(); emit(); }
+        return exist;
+      }
+      var item = { id: U.uid('it'), name: name, categoryId: categoryId || null, enabled: true, createdAt: Date.now() };
+      data.items.push(item);
+      if (!silent) { save(); emit(); }
+      return item;
+    },
+
+    /** 批量添加，返回 { added, dup } */
+    addItems: function (names, categoryId) {
+      var added = 0, dup = 0;
+      (names || []).forEach(function (n) {
+        var before = api.itemByName(n);
+        var it = api.addItem(n, categoryId, true);
+        if (!it) return;
+        if (before) dup++; else added++;
+      });
+      save(); emit();
+      return { added: added, dup: dup };
+    },
+
+    updateItem: function (id, patch) {
+      var item = api.findItem(id);
+      if (!item) return;
+      if (patch.name !== undefined) {
+        var name = String(patch.name).trim().replace(/\s+/g, ' ');
+        if (name) item.name = name;
+      }
+      if (patch.categoryId !== undefined) item.categoryId = patch.categoryId || null;
+      if (patch.enabled !== undefined) item.enabled = !!patch.enabled;
+      save(); emit();
+    },
+
+    removeItem: function (id) {
+      data.items = data.items.filter(function (i) { return i.id !== id; });
+      save(); emit();
+    },
+
+    setEnabled: function (id, on) {
+      var it = api.findItem(id);
+      if (!it) return;
+      it.enabled = !!on;
+      save(); emit();
+    },
+
+    setManyEnabled: function (ids, on) {
+      var set = {};
+      (ids || []).forEach(function (id) { set[id] = 1; });
+      data.items.forEach(function (i) { if (set[i.id]) i.enabled = !!on; });
+      save(); emit();
+    },
+
+    setAllEnabled: function (on) {
+      data.items.forEach(function (i) { i.enabled = !!on; });
+      save(); emit();
+    },
+
+    invertEnabled: function () {
+      data.items.forEach(function (i) { i.enabled = !i.enabled; });
+      save(); emit();
+    },
+
+    /** 只留下这一个在转盘上 */
+    soloItem: function (id) {
+      data.items.forEach(function (i) { i.enabled = i.id === id; });
+      save(); emit();
+    },
+
+    clearItems: function () {
+      data.items = [];
+      data.history = [];
+      save(); emit();
+    },
+
+    /* ------------------------------ 查询 ------------------------------ */
+
+    itemsOf: function (categoryId) {
+      return data.items.filter(function (i) { return (i.categoryId || null) === (categoryId || null); });
+    },
+
+    enabledItems: function () {
+      return data.items.filter(function (i) { return i.enabled; });
+    },
+
+    groups: function () {
+      var list = data.categories.map(function (c) {
+        return { id: c.id, name: c.name, collapsed: !!c.collapsed, items: api.itemsOf(c.id) };
+      });
+      list.push({ id: null, name: '未分类', collapsed: !!data.uncategorizedCollapsed, items: api.itemsOf(null), virtual: true });
+      return list;
+    },
+
+    stats: function () {
+      var on = api.enabledItems().length;
+      return { items: data.items.length, enabled: on, categories: data.categories.length };
+    },
+
+    /* ------------------------------ 历史 ------------------------------ */
+
+    addHistory: function (name) {
+      data.history = [name].concat((data.history || []).filter(function (n) { return n !== name; })).slice(0, HISTORY_MAX);
+      save(); emit();
+    },
+
+    clearHistory: function () {
+      data.history = [];
+      save(); emit();
+    },
+
+    /* ------------------------------ 设置 ------------------------------ */
+
+    setSetting: function (key, value) {
+      data.settings[key] = value;
+      save(); emit();
+    },
+
+    setVision: function (patch) {
+      Object.keys(patch).forEach(function (k) { data.settings.vision[k] = patch[k]; });
+      save(); emit();
+    },
+
+    applyProvider: function (providerId) {
+      var p = null;
+      PROVIDERS.forEach(function (x) { if (x.id === providerId) p = x; });
+      if (!p) return null;
+      data.settings.vision.provider = p.id;
+      if (p.baseUrl) data.settings.vision.baseUrl = p.baseUrl;
+      if (p.model) data.settings.vision.model = p.model;
+      save(); emit();
+      return p;
+    },
+
+    /* ------------------------------ 导入导出 ------------------------------ */
+
+    exportObject: function () {
+      return {
+        app: 'what-to-eat-wheel',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        categories: data.categories,
+        items: data.items,
+        history: data.history,
+        settings: (function () {
+          var s = clone(data.settings);
+          if (s.vision) s.vision.apiKey = ''; // 备份里不带走 Key
+          return s;
+        })(),
+      };
+    },
+
+    importObject: function (obj, mode) {
+      if (!obj || typeof obj !== 'object') throw new Error('文件内容不是合法的 JSON 对象');
+      var items = Array.isArray(obj.items) ? obj.items : null;
+      var cats = Array.isArray(obj.categories) ? obj.categories : null;
+      if (!items && !cats) throw new Error('文件里没有 items / categories 字段，可能不是本应用导出的备份');
+
+      if (mode === 'replace') { data.items = []; data.categories = []; }
+
+      var idMap = {};
+      var catByName = {};
+      data.categories.forEach(function (c) { catByName[c.name] = c.id; });
+
+      (cats || []).forEach(function (c) {
+        var name = String(c.name || '').trim();
+        if (!name) return;
+        if (catByName[name]) { idMap[c.id] = catByName[name]; return; }
+        var cat = api.addCategory(name, true);
+        catByName[name] = cat.id;
+        idMap[c.id] = cat.id;
+      });
+
+      var added = 0, dup = 0;
+      (items || []).forEach(function (raw) {
+        var name = String(raw.name || '').trim();
+        if (!name) return;
+        var targetCat = raw.categoryId ? idMap[raw.categoryId] || null : null;
+        var exist = api.itemByName(name);
+        if (exist) {
+          dup++;
+          if (targetCat && !exist.categoryId) exist.categoryId = targetCat;
+          if (raw.enabled === false) exist.enabled = false;
+          return;
+        }
+        var it = api.addItem(name, targetCat, true);
+        if (it) { added++; if (raw.enabled === false) it.enabled = false; }
+      });
+
+      if (obj.settings && typeof obj.settings === 'object') {
+        var s = mergeSettings(obj.settings);
+        s.vision.apiKey = data.settings.vision.apiKey; // 保留本机已有的 Key
+        data.settings = s;
+      }
+      data.seeded = true;
+      save(true); emit();
+      return { added: added, dup: dup, categories: (cats || []).length };
+    },
+
+    resetAll: function () {
+      data = defaultData();
+      data.seeded = true;
+      save(true); emit();
+    },
+  };
+
+  W.Store = api;
+})(window);
+
+/* ===== classify.js ===== */
+/* ============================================================
+   classify.js · 智能归类
+   思路：中餐菜名基本是「前缀 + 品类词」的结构，例如
+     麻辣鸡丁【滑蛋饭】 / 五花肉【滑蛋饭】
+   所以用「共同后缀」聚类就能自动长出大类，不需要用户手动建。
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = (global.W = global.W || {});
+  var U = W.Util;
+
+  /** 菜品品类词：后缀以它们结尾时，归类更可信 */
+  var FOOD_WORDS = [
+    '饭', '面', '粉', '线', '汤', '粥', '饼', '包', '卷', '馍', '饺', '锅', '煲', '串', '排', '扒',
+    '翅', '腿', '肉', '鸡', '鸭', '鱼', '虾', '牛', '羊', '猪', '蛋', '菜', '豆', '丸', '糕', '酥',
+    '茶', '汁', '奶', '派', '塔', '冻', '捞', '卤', '烤', '炸',
+    '盖饭', '炒饭', '拌饭', '烩饭', '煲仔饭', '卤肉饭', '鸡排饭', '咖喱饭', '蛋炒饭', '饭团',
+    '米线', '河粉', '肠粉', '拉面', '刀削面', '炒面', '汤面', '拌面', '凉面', '意面', '炒粉',
+    '麻辣烫', '砂锅', '干锅', '火锅', '关东煮', '手抓饼', '肉夹馍', '煎饼', '烧麦', '小笼包',
+    '汉堡', '披萨', '寿司', '沙拉', '三明治', '套餐', '盖浇饭',
+  ];
+
+  var MIN_LEN = 3;   // 后缀至少 3 个字，避免出现「肉面」「蛋饭」这种怪大类
+  var MAX_LEN = 6;
+
+  function endsWithFoodWord(suf) {
+    for (var i = 0; i < FOOD_WORDS.length; i++) {
+      var w = FOOD_WORDS[i];
+      if (suf.length >= w.length && suf.slice(suf.length - w.length) === w) return true;
+    }
+    return false;
+  }
+
+  /** 后缀是否值得单独成为一个大类 */
+  function isPlausible(suf, count) {
+    if (suf.length < MIN_LEN) return false;
+    if (endsWithFoodWord(suf)) return true;
+    return count >= 3 && suf.length >= 4;
+  }
+
+  function uniq(arr) {
+    var seen = {}, out = [];
+    arr.forEach(function (x) { if (!seen[x]) { seen[x] = 1; out.push(x); } });
+    return out;
+  }
+
+  /** 名称里已经包含某个大类名 → 取最长匹配 */
+  function matchExisting(name, categories) {
+    var best = null;
+    (categories || []).forEach(function (c) {
+      if (!c.name || c.name === name) return;
+      if (name.length > c.name.length && name.indexOf(c.name) >= 0) {
+        if (!best || c.name.length > best.name.length) best = c;
+      }
+    });
+    return best;
+  }
+
+  /** 计算两个名字的最长可信公共后缀 */
+  function commonSuffix(a, b) {
+    var maxLen = Math.min(MAX_LEN, Math.min(a.length, b.length) - 1);
+    for (var len = maxLen; len >= MIN_LEN; len--) {
+      var sa = a.slice(a.length - len);
+      var sb = b.slice(b.length - len);
+      if (sa === sb && (endsWithFoodWord(sa) || sa.length >= 4)) return sa;
+    }
+    return null;
+  }
+
+  /**
+   * 全量规划：算出每个条目应该归到哪个大类，以及需要新建哪些大类。
+   * 不会修改任何数据，纯函数，方便单测。
+   */
+  function planAll(items, categories) {
+    var assign = {};                 // itemId -> categoryId
+    var catByName = {};
+    (categories || []).forEach(function (c) { catByName[c.name] = c; });
+    var created = [];
+
+    // 第一步：名字里已经含有现成大类名
+    items.forEach(function (it) {
+      var hit = matchExisting(it.name, categories);
+      if (hit) assign[it.id] = hit.id;
+    });
+
+    // 第二步：剩下的按共同后缀聚类，长的后缀优先
+    var free = items.filter(function (it) { return !assign[it.id] && it.name.length > MIN_LEN; });
+    var buckets = {};
+    free.forEach(function (it) {
+      var n = it.name;
+      var maxLen = Math.min(MAX_LEN, n.length - 1);
+      for (var len = MIN_LEN; len <= maxLen; len++) {
+        var suf = n.slice(n.length - len);
+        (buckets[suf] = buckets[suf] || []).push(it.id);
+      }
+    });
+
+    var candidates = Object.keys(buckets).map(function (suf) {
+      return { suf: suf, ids: uniq(buckets[suf]) };
+    }).filter(function (c) {
+      return c.ids.length >= 2 && isPlausible(c.suf, c.ids.length);
+    }).sort(function (a, b) {
+      return b.suf.length - a.suf.length || b.ids.length - a.ids.length;
+    });
+
+    candidates.forEach(function (c) {
+      var members = c.ids.filter(function (id) { return !assign[id]; });
+      if (members.length < 2) return;
+      var cat = catByName[c.suf];
+      if (!cat) {
+        cat = { id: U.uid('cat'), name: c.suf, virtual: false };
+        created.push(cat);
+        catByName[c.suf] = cat;
+      }
+      members.forEach(function (id) { assign[id] = cat.id; });
+    });
+
+    return { assign: assign, created: created };
+  }
+
+  /**
+   * 添加单个新菜时猜测它该进哪个大类。
+   * 返回 { categoryId } 或 { newCategoryName, mateItemId }（需要新建大类并把老条目一起挪进去）
+   */
+  function suggestForNew(name, items, categories) {
+    name = String(name || '').trim();
+    if (!name) return null;
+    var hit = matchExisting(name, categories);
+    if (hit) return { categoryId: hit.id };
+
+    var best = null;
+    (items || []).forEach(function (it) {
+      if (it.name === name) return;
+      var suf = commonSuffix(name, it.name);
+      if (!suf) return;
+      if (!best || suf.length > best.suf.length) best = { suf: suf, mate: it };
+    });
+    if (best) return { newCategoryName: best.suf, mateItemId: best.mate.id };
+    return null;
+  }
+
+  W.Classify = {
+    FOOD_WORDS: FOOD_WORDS,
+    endsWithFoodWord: endsWithFoodWord,
+    isPlausible: isPlausible,
+    matchExisting: matchExisting,
+    commonSuffix: commonSuffix,
+    planAll: planAll,
+    suggestForNew: suggestForNew,
+  };
+})(window);
+
+/* ===== wheel.js ===== */
+/* ============================================================
+   wheel.js · 转盘绘制与旋转动画
+   指针固定在正上方；旋转角度用弧度表示，canvas 的 0° 指向右侧、顺时针为正。
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = (global.W = global.W || {});
+  var U = W.Util;
+
+  var TWO_PI = Math.PI * 2;
+  var POINTER_ANGLE = -Math.PI / 2;   // 正上方
+
+  /* ------------------------------ 音效 ------------------------------ */
+
+  var Sound = {
+    ctx: null,
+    enabled: true,
+    ensure: function () {
+      if (this.ctx) return this.ctx;
+      var Ctor = global.AudioContext || global.webkitAudioContext;
+      if (!Ctor) return null;
+      try { this.ctx = new Ctor(); } catch (e) { this.ctx = null; }
+      return this.ctx;
+    },
+    resume: function () {
+      var ctx = this.ensure();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    },
+    /** 嘀嗒声：越到后面越慢（由调用方控制频率） */
+    tick: function (strength) {
+      if (!this.enabled) return;
+      var ctx = this.ensure();
+      if (!ctx || ctx.state !== 'running') return;
+      var t = ctx.currentTime;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 1100 + 500 * (strength || 0);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.05, t + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.06);
+    },
+    fanfare: function () {
+      if (!this.enabled) return;
+      var ctx = this.ensure();
+      if (!ctx || ctx.state !== 'running') return;
+      var notes = [523.25, 659.25, 783.99, 1046.5];
+      var self = this;
+      notes.forEach(function (f, i) {
+        var t = ctx.currentTime + i * 0.085;
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = f;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.34);
+      });
+      void self;
+    },
+  };
+
+  /* ------------------------------ 转盘 ------------------------------ */
+
+  function Wheel(canvas, options) {
+    options = options || {};
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.items = [];
+    this.rotation = POINTER_ANGLE;
+    this.size = 320;
+    this.radius = 150;
+    this.dpr = 1;
+    this.spinning = false;
+    this.highlightIndex = -1;
+    this.onTick = options.onTick || null;
+    this.raf = null;
+    this.resize();
+  }
+
+  Wheel.prototype.resize = function () {
+    var rect = this.canvas.getBoundingClientRect();
+    var cssSize = Math.max(180, Math.round(Math.min(rect.width || 320, rect.height || 320)));
+    var dpr = Math.min(global.devicePixelRatio || 1, 3);
+    if (this.size === cssSize && this.dpr === dpr) return;
+    this.size = cssSize;
+    this.dpr = dpr;
+    this.canvas.width = Math.round(cssSize * dpr);
+    this.canvas.height = Math.round(cssSize * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.radius = cssSize / 2 - 6;
+    this.draw();
+  };
+
+  Wheel.prototype.setItems = function (items) {
+    this.items = (items || []).slice();
+    this.highlightIndex = -1;
+    this.draw();
+  };
+
+  /** 估算一段文字的宽度（以字号为单位）：中文算 1 个字，英文数字算 0.56 个 */
+  function textUnits(s) {
+    var u = 0;
+    s = String(s || '');
+    for (var i = 0; i < s.length; i++) {
+      u += /[\u3000-\u9fff\uff00-\uffef]/.test(s[i]) ? 1 : 0.56;
+    }
+    return u || 1;
+  }
+
+  Wheel.prototype.fitText = function (text, maxWidth) {
+    var ctx = this.ctx;
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    var lo = 1, hi = text.length;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      if (ctx.measureText(text.slice(0, mid) + '…').width <= maxWidth) lo = mid; else hi = mid - 1;
+    }
+    return text.slice(0, Math.max(1, lo)) + '…';
+  };
+
+  Wheel.prototype.draw = function () {
+    var ctx = this.ctx;
+    var size = this.size, R = this.radius;
+    var cx = size / 2, cy = size / 2;
+    ctx.clearRect(0, 0, size, size);
+
+    // 底圈
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, TWO_PI);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fill();
+
+    var items = this.items;
+    if (!items.length) {
+      ctx.save();
+      ctx.setLineDash([7, 7]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, R - 8, 0, TWO_PI);
+      ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.62)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '600 ' + Math.round(size * 0.055) + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillText('转盘是空的', cx, cy - size * 0.13);
+      ctx.font = '400 ' + Math.round(size * 0.042) + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.42)';
+      ctx.fillText('去下面「菜品」里加几个吧', cx, cy - size * 0.13 + size * 0.07);
+      return;
+    }
+
+    var n = items.length;
+    var step = TWO_PI / n;
+
+    // 字号要在三个约束里取最小：
+    //   ① 扇区弧长（扇区越多字越小）② 最长菜名能塞进半径方向 ③ 上限 26px
+    // 这样短名字不会被长名字拖累太多，长名字也尽量别被截断。
+    var hubR = size * 0.14;                                   // 中心按钮半径
+    var maxTextWidth = Math.max(40, R - 16 - hubR - 8);       // 半径方向可用的文字长度
+    var longest = 1;
+    for (var k = 0; k < n; k++) longest = Math.max(longest, textUnits(items[k].name));
+    var byName = maxTextWidth / longest;
+    var byArc = step * (R * 0.62) * 0.72;
+    var fontSize = U.clamp(Math.min(26, size * 0.075, byArc, byName), 10, 26);
+    var showText = byArc >= 10;
+
+    for (var i = 0; i < n; i++) {
+      var a0 = this.rotation + i * step;
+      var a1 = a0 + step;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, R, a0, a1);
+      ctx.closePath();
+      ctx.fillStyle = U.paletteColor(i, n, 64, i === this.highlightIndex ? 66 : 56);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.42)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (this.highlightIndex === i) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R, a0, a1);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      if (!showText) continue;
+
+      var mid = a0 + step / 2;
+      var norm = ((mid % TWO_PI) + TWO_PI) % TWO_PI;
+      var flip = norm > Math.PI / 2 && norm < Math.PI * 1.5;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(flip ? mid + Math.PI : mid);
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = flip ? 'left' : 'right';
+      ctx.font = '700 ' + fontSize.toFixed(1) + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      var label = this.fitText(items[i].name, maxTextWidth);
+      var x = flip ? -(R - 14) : R - 14;
+      ctx.fillText(label, x + 0.8, 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, x, 0);
+      ctx.restore();
+    }
+
+    // 外圈描边
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 1.5, 0, TWO_PI);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.stroke();
+  };
+
+  /**
+   * 转动。返回 Promise<{item, index}>
+   * opts: { duration: 秒, sound: bool }
+   */
+  Wheel.prototype.spin = function (opts) {
+    var self = this;
+    opts = opts || {};
+    var items = this.items;
+    if (this.spinning) return Promise.resolve(null);
+    if (!items.length) return Promise.resolve(null);
+
+    var n = items.length;
+    var step = TWO_PI / n;
+    var duration = Math.max(1.2, opts.duration || 4.5);
+    var winner = Math.floor(Math.random() * n);
+
+    // 让中奖扇区的中心（带一点随机偏移）正好停在指针下
+    var jitter = (Math.random() - 0.5) * step * 0.62;
+    var target = POINTER_ANGLE - (winner + 0.5) * step + jitter;
+    var start = this.rotation;
+    var turns = 6 + Math.floor(Math.random() * 2);
+    var delta = (((target - start) % TWO_PI) + TWO_PI) % TWO_PI + turns * TWO_PI;
+
+    this.spinning = true;
+    this.highlightIndex = -1;
+    Sound.resume();
+
+    var startTime = 0;
+    var lastSector = null;
+    var ease = function (t) { return 1 - Math.pow(1 - t, 3.7); };
+
+    return new Promise(function (resolve) {
+      function frame(now) {
+        if (!startTime) startTime = now;
+        var t = U.clamp((now - startTime) / (duration * 1000), 0, 1);
+        var eased = ease(t);
+        self.rotation = start + delta * eased;
+
+        if (opts.sound !== false) {
+          var sector = Math.floor(self.rotation / step);
+          if (lastSector === null) lastSector = sector;
+          else if (sector !== lastSector) {
+            lastSector = sector;
+            Sound.tick(1 - t);
+          }
+        }
+
+        self.draw();
+
+        if (t < 1) {
+          self.raf = global.requestAnimationFrame(frame);
+          return;
+        }
+
+        self.rotation = ((start + delta) % TWO_PI + TWO_PI) % TWO_PI;
+        self.spinning = false;
+        self.raf = null;
+        self.highlightIndex = winner;
+        self.draw();
+        if (opts.sound !== false) Sound.fanfare();
+        if (self.onTick) self.onTick(1);
+        resolve({ item: items[winner], index: winner });
+      }
+      self.raf = global.requestAnimationFrame(frame);
+    });
+  };
+
+  W.Wheel = Wheel;
+  W.Sound = Sound;
+})(window);
+
+/* ===== vision.js ===== */
+/* ============================================================
+   vision.js · 拍照识别菜品（任何 OpenAI 兼容的视觉模型接口）
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = (global.W = global.W || {});
+  var U = W.Util;
+
+  var PROMPT = [
+    '你是一个食堂菜品识别助手。请看这张照片（可能是食堂菜牌、菜单、黑板、或者餐盘），列出所有能认出来的菜品或食物。',
+    '严格要求：',
+    '1. 只输出 JSON，不要任何解释文字，不要 markdown 代码块。',
+    '2. 格式：{"dishes":[{"name":"菜名","category":"大类"}]}',
+    '3. name 用中文菜名，尽量写完整，例如「麻辣鸡丁滑蛋饭」而不是「饭」；看不清口味就用最接近的通用名。',
+    '4. category 是这道菜归属的大类，例如「麻辣鸡丁滑蛋饭」属于「滑蛋饭」，「红烧牛肉面」属于「牛肉面」；判断不出来就填 null。',
+    '5. 最多列出 20 道，重复的只留一个。',
+    '6. 如果照片里没有任何食物，返回 {"dishes":[]}。',
+  ].join('\n');
+
+  function endpoint(baseUrl) {
+    var url = String(baseUrl || '').trim().replace(/\/+$/, '');
+    if (!url) throw new Error('还没有填接口地址');
+    if (/\/chat\/completions$/.test(url)) return url;
+    return url + '/chat/completions';
+  }
+
+  function extractJson(text) {
+    var s = String(text || '').trim();
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    try { return JSON.parse(s); } catch (e) { /* 继续找 */ }
+    var starts = [s.indexOf('{'), s.indexOf('[')].filter(function (i) { return i >= 0; });
+    if (!starts.length) throw new Error('模型没有返回 JSON：' + s.slice(0, 120));
+    var from = Math.min.apply(null, starts);
+    var openCh = s[from];
+    var closeCh = openCh === '{' ? '}' : ']';
+    var depth = 0, inStr = false, esc = false, end = -1;
+    for (var i = from; i < s.length; i++) {
+      var ch = s[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === openCh) depth++;
+      else if (ch === closeCh) { depth--; if (depth === 0) { end = i; break; } }
+    }
+    var raw = end >= 0 ? s.slice(from, end + 1) : s.slice(from);
+    return JSON.parse(raw);
+  }
+
+  function normalizeDishes(parsed) {
+    var list = [];
+    if (Array.isArray(parsed)) list = parsed;
+    else if (parsed && Array.isArray(parsed.dishes)) list = parsed.dishes;
+    else if (parsed && Array.isArray(parsed.data)) list = parsed.data;
+    else if (parsed && Array.isArray(parsed.result)) list = parsed.result;
+    else if (parsed && typeof parsed === 'object') {
+      Object.keys(parsed).forEach(function (k) {
+        if (Array.isArray(parsed[k])) list = list.concat(parsed[k]);
+      });
+    }
+    var out = [];
+    var seen = {};
+    list.forEach(function (d) {
+      var name = '', category = '';
+      if (typeof d === 'string') name = d;
+      else if (d && typeof d === 'object') {
+        name = d.name || d.dish || d.title || d.food || '';
+        category = d.category || d.cat || d.type || d.group || '';
+      }
+      name = String(name).trim().replace(/\s+/g, ' ');
+      category = String(category || '').trim();
+      if (!name || name === 'null') return;
+      if (seen[name]) return;
+      seen[name] = 1;
+      out.push({ name: name, category: category || null });
+    });
+    return out;
+  }
+
+  function friendlyError(status, bodyText) {
+    var detail = String(bodyText || '').slice(0, 220);
+    if (status === 401 || status === 403) return 'API Key 不对或没有权限（HTTP ' + status + '）：' + detail;
+    if (status === 404) return '接口地址或模型名不对（HTTP 404）：' + detail;
+    if (status === 429) return '请求太频繁 / 额度用完了（HTTP 429）：' + detail;
+    return '接口返回 HTTP ' + status + '：' + detail;
+  }
+
+  function postDirect(url, headers, payload, timeoutMs) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 60000);
+    return fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload),
+      signal: ctrl ? ctrl.signal : undefined,
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(friendlyError(res.status, text));
+        return text;
+      });
+    }).catch(function (err) {
+      clearTimeout(timer);
+      if (err && err.name === 'AbortError') throw new Error('请求超时（' + ((timeoutMs || 60000) / 1000) + ' 秒），网络太慢或图片太大');
+      if (err instanceof Error && /^接口返回|^API Key|^接口地址/.test(err.message)) throw err;
+      throw new Error('请求发不出去：' + (err && err.message ? err.message : err) +
+        '。常见原因是浏览器跨域（CORS）被拦——打开「设置 → 通过本地代理请求」，或用手机浏览器直接打开本页面重试。');
+    });
+  }
+
+  function readContent(text) {
+    var json;
+    try { json = JSON.parse(text); }
+    catch (e) { throw new Error('接口返回的不是 JSON：' + String(text).slice(0, 160)); }
+    if (json.error) throw new Error('接口报错：' + (json.error.message || JSON.stringify(json.error)).slice(0, 200));
+    var choice = json.choices && json.choices[0];
+    if (!choice) throw new Error('接口没有返回 choices：' + String(text).slice(0, 160));
+    var msg = choice.message || {};
+    var content = msg.content;
+    if (Array.isArray(content)) {
+      content = content.map(function (p) { return typeof p === 'string' ? p : (p && p.text) || ''; }).join('');
+    }
+    if (!content && msg.reasoning_content) content = msg.reasoning_content;
+    return { content: String(content || ''), usage: json.usage || null };
+  }
+
+  var Vision = {
+    PROMPT: PROMPT,
+    endpoint: endpoint,
+    extractJson: extractJson,
+    normalizeDishes: normalizeDishes,
+
+    /** 直接调用（或经本地代理）一次 chat/completions */
+    call: function (settings, messages, opts) {
+      opts = opts || {};
+      var v = (settings && settings.vision) || settings || {};
+      if (!v.apiKey) throw new Error('还没有填 API Key，去「设置」里填一下');
+      var payload = {
+        model: v.model,
+        messages: messages,
+        temperature: 0.1,
+        max_tokens: opts.maxTokens || 1200,
+      };
+      if (!payload.model) throw new Error('还没有填模型名，去「设置」里填一下');
+
+      var useProxy = !!v.useProxy && global.location && global.location.protocol !== 'file:';
+      if (useProxy) {
+        return postDirect('/api/vision', { 'Content-Type': 'application/json' }, {
+          baseUrl: v.baseUrl, apiKey: v.apiKey, model: v.model, payload: payload,
+        }, opts.timeoutMs).then(readContent);
+      }
+      return postDirect(endpoint(v.baseUrl), {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + v.apiKey,
+      }, payload, opts.timeoutMs).then(readContent);
+    },
+
+    /** 识别一张或多张图片（dataURL 数组） */
+    recognize: function (settings, images, onProgress) {
+      var content = [{ type: 'text', text: PROMPT }];
+      (images || []).forEach(function (url) {
+        content.push({ type: 'image_url', image_url: { url: url } });
+      });
+      if (onProgress) onProgress('正在识别…');
+      return Vision.call(settings, [{ role: 'user', content: content }], { timeoutMs: 90000 })
+        .then(function (r) {
+          var parsed = extractJson(r.content);
+          return { dishes: normalizeDishes(parsed), raw: r.content, usage: r.usage };
+        });
+    },
+
+    /** 测试连接：发一句纯文本，验证地址 / Key / 模型名是否可用 */
+    test: function (settings) {
+      return Vision.call(settings, [{ role: 'user', content: '回复两个字：收到' }], { maxTokens: 16, timeoutMs: 30000 })
+        .then(function (r) { return { ok: true, message: '连接正常，模型回复：' + r.content.trim().slice(0, 40) }; });
+    },
+  };
+
+  W.Vision = Vision;
+})(window);
+
+/* ===== ui.js ===== */
+/* ============================================================
+   ui.js · 弹窗 / 提示 / 表单 / 撒花
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = (global.W = global.W || {});
+  var U = W.Util;
+  var el = U.el;
+
+  var mask = null;
+  var modalBox = null;
+  var toastWrap = null;
+
+  function init() {
+    mask = U.$('#modal-mask');
+    modalBox = U.$('#modal');
+    toastWrap = U.$('#toast-wrap');
+    // 点遮罩上的任何地方都能关（除了点在弹窗里的控件上）。
+    // 以前只认「点中的正好是遮罩本身」，一旦弹窗内容出问题，用户就会觉得整个 App 点不动。
+    mask.addEventListener('click', function (e) {
+      if (!current || !current.dismissible) return;
+      if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, label, a')) return;
+      current.close(null);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && current && current.dismissible) current.close(null);
+    });
+
+    // 自检：遮罩可见但里面没有任何内容 = 一定是出问题了。
+    // 与其让用户面对一个点不动的界面，不如自己把它关掉。
+    setInterval(function () {
+      if (mask && !mask.hidden && !modalBox.childNodes.length) closeModal();
+    }, 400);
+  }
+
+  var current = null;
+
+  function closeModal() {
+    if (!mask) return;
+    mask.hidden = true;
+    mask.style.display = 'none';   // 内联样式优先级最高，不依赖 CSS 里那条 [hidden] 规则
+    U.clear(modalBox);
+    current = null;
+  }
+
+  /** 兜底：任何未捕获的错误都不该让界面卡死，先保证遮罩能关掉 */
+  function panic(err) {
+    try {
+      closeModal();
+      toast('出错了：' + ((err && err.message) || err), 'err', 6000);
+    } catch (e) { /* 兜底逻辑本身不能再抛错 */ }
+  }
+
+  /**
+   * 通用弹窗。opts:
+   *   title, body(Node|string), actions:[{text, primary, danger, value}], dismissible
+   * 返回 Promise，resolve 被点按钮的 value（点遮罩/ESC 为 null）
+   */
+  function open(opts) {
+    if (!mask) init();
+    return new Promise(function (resolve) {
+      U.clear(modalBox);
+      if (opts.title) modalBox.appendChild(el('h3', { text: opts.title }));
+      if (opts.body) modalBox.appendChild(typeof opts.body === 'string' ? el('p', { text: opts.body }) : opts.body);
+      var actions = opts.actions || [{ text: '知道了', primary: true, value: 'ok' }];
+      var row = el('div', { class: 'modal-actions' });
+      actions.forEach(function (a) {
+        row.appendChild(el('button', {
+          class: 'btn' + (a.primary ? ' primary' : a.danger ? ' danger' : ' ghost'),
+          text: a.text,
+          onclick: function () { current.close(a.value === undefined ? a.text : a.value); },
+        }));
+      });
+      modalBox.appendChild(row);
+      mask.hidden = false;
+      mask.style.display = 'grid';   // 同上，双保险
+      current = {
+        dismissible: opts.dismissible !== false,
+        close: function (value) { closeModal(); resolve(value); },
+      };
+      var focusTarget = modalBox.querySelector('input, select, textarea, button');
+      if (focusTarget) setTimeout(function () { try { focusTarget.focus(); } catch (e) { /* ignore */ } }, 30);
+    });
+  }
+
+  /** 表单弹窗，返回 {action, values} 或 null */
+  function form(opts) {
+    if (!mask) init();
+    return new Promise(function (resolve) {
+      var inputs = {};
+      var body = el('div');
+      if (opts.hint) body.appendChild(el('p', { text: opts.hint }));
+      (opts.fields || []).forEach(function (f) {
+        var field = el('div', { class: 'field' });
+        if (f.type === 'checkbox') {
+          var cb = el('input', { type: 'checkbox', checked: !!f.value });
+          inputs[f.key] = cb;
+          field.appendChild(el('label', { class: 'check' }, [cb, el('span', { text: f.label })]));
+        } else {
+          field.appendChild(el('label', { class: 'label', text: f.label }));
+          var input;
+          if (f.type === 'select') {
+            input = el('select', { class: 'input' });
+            (f.options || []).forEach(function (o) {
+              input.appendChild(el('option', { value: o.value === null ? '' : o.value, text: o.label, selected: String(o.value === null ? '' : o.value) === String(f.value === null ? '' : f.value) }));
+            });
+          } else if (f.type === 'textarea') {
+            input = el('textarea', { class: 'input', rows: f.rows || 6, value: f.value === null || f.value === undefined ? '' : f.value });
+            input.style.resize = 'vertical';
+            input.style.fontFamily = 'ui-monospace, Menlo, Consolas, monospace';
+            input.style.fontSize = '12px';
+          } else {
+            input = el('input', { class: 'input', type: f.type || 'text', value: f.value === null || f.value === undefined ? '' : f.value, placeholder: f.placeholder || '', autocomplete: 'off' });
+          }
+          inputs[f.key] = input;
+          field.appendChild(input);
+        }
+        if (f.hint) field.appendChild(el('div', { class: 'hint', text: f.hint }));
+        body.appendChild(field);
+      });
+
+      var actions = [];
+      if (opts.extra) {
+        opts.extra.forEach(function (a) {
+          actions.push({
+            text: a.text, danger: a.danger,
+            value: a.value,
+          });
+        });
+      }
+      actions.push({ text: opts.cancelText || '取消', value: null });
+      actions.push({ text: opts.okText || '确定', primary: true, value: '__ok__' });
+
+      U.clear(modalBox);
+      if (opts.title) modalBox.appendChild(el('h3', { text: opts.title }));
+      modalBox.appendChild(body);
+      var row = el('div', { class: 'modal-actions' });
+      actions.forEach(function (a) {
+        row.appendChild(el('button', {
+          class: 'btn' + (a.primary ? ' primary' : a.danger ? ' danger' : ' ghost'),
+          text: a.text,
+          onclick: function () { submit(a.value); },
+        }));
+      });
+      modalBox.appendChild(row);
+      mask.hidden = false;
+      mask.style.display = 'grid';
+
+      function collect() {
+        var values = {};
+        Object.keys(inputs).forEach(function (k) {
+          var node = inputs[k];
+          values[k] = node.type === 'checkbox' ? node.checked : node.value;
+        });
+        return values;
+      }
+
+      var submitted = false;
+      function submit(action) {
+        if (submitted) return;
+        submitted = true;
+        var values = collect();
+        closeModal();
+        if (action === null) resolve(null);
+        else if (action === '__ok__') resolve({ action: 'ok', values: values });
+        else resolve({ action: action, values: values });
+      }
+
+      current = {
+        dismissible: opts.dismissible !== false,
+        close: function (v) { if (!submitted) { submitted = true; closeModal(); resolve(v); } },
+      };
+
+      // 回车提交
+      Object.keys(inputs).forEach(function (k) {
+        var node = inputs[k];
+        if (node.tagName === 'INPUT') {
+          node.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit('__ok__'); }
+          });
+        }
+      });
+      var focusTarget = body.querySelector('input, select, textarea');
+      if (focusTarget) setTimeout(function () { try { focusTarget.focus(); focusTarget.select && focusTarget.select(); } catch (e) { /* ignore */ } }, 30);
+    });
+  }
+
+  function toast(message, type, ms) {
+    if (!toastWrap) init();
+    var node = el('div', { class: 'toast' + (type ? ' ' + type : ''), text: message });
+    toastWrap.appendChild(node);
+    setTimeout(function () {
+      node.style.transition = 'opacity .3s, transform .3s';
+      node.style.opacity = '0';
+      node.style.transform = 'translateY(8px)';
+      setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 320);
+    }, ms || (type === 'err' ? 4200 : 2200));
+  }
+
+  /* ------------------------------ 撒花 ------------------------------ */
+
+  var confettiRaf = null;
+  function confetti() {
+    var canvas = U.$('#confetti');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var dpr = Math.min(global.devicePixelRatio || 1, 2);
+    var W0 = global.innerWidth, H0 = global.innerHeight;
+    canvas.width = W0 * dpr;
+    canvas.height = H0 * dpr;
+    canvas.hidden = false;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    var colors = ['#ff8a3d', '#ffd166', '#06d6a0', '#8b5cf6', '#ef476f', '#4cc9f0'];
+    var parts = [];
+    for (var i = 0; i < 110; i++) {
+      parts.push({
+        x: W0 / 2 + (Math.random() - 0.5) * W0 * 0.5,
+        y: H0 * 0.34 + (Math.random() - 0.5) * 60,
+        vx: (Math.random() - 0.5) * 9,
+        vy: -6 - Math.random() * 9,
+        size: 5 + Math.random() * 7,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.3,
+        color: colors[(Math.random() * colors.length) | 0],
+        life: 0,
+      });
+    }
+    var start = 0;
+    function frame(now) {
+      if (!start) start = now;
+      var elapsed = now - start;
+      ctx.clearRect(0, 0, W0, H0);
+      parts.forEach(function (p) {
+        p.vy += 0.42;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.vr;
+        p.vx *= 0.995;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, 1 - elapsed / 2200);
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.62);
+        ctx.restore();
+      });
+      if (elapsed < 2200) confettiRaf = global.requestAnimationFrame(frame);
+      else {
+        ctx.clearRect(0, 0, W0, H0);
+        canvas.hidden = true;
+        confettiRaf = null;
+      }
+    }
+    if (confettiRaf) global.cancelAnimationFrame(confettiRaf);
+    confettiRaf = global.requestAnimationFrame(frame);
+  }
+
+  W.UI = { init: init, open: open, form: form, toast: toast, confetti: confetti, close: closeModal, panic: panic };
+})(window);
+
+/* ===== app.js ===== */
+/* ============================================================
+   app.js · 主程序：把各个模块串起来
+   ============================================================ */
+(function (global) {
+  'use strict';
+  var W = global.W;
+  var S = W.Store;
+  var U = W.Util;
+  var UI = W.UI;
+  var el = U.el;
+
+  var wheel = null;
+  var lastPicked = null;
+  var photoFiles = [];          // 最近一次选的图片（压缩后的 dataURL）
+  var recognizedDishes = [];     // 识别结果
+
+  var els = {};
+
+  function $(id) { return document.getElementById(id); }
+
+  /* ============================== 主题 ============================== */
+
+  var media = global.matchMedia ? global.matchMedia('(prefers-color-scheme: light)') : null;
+
+  function applyTheme() {
+    var t = S.settings.theme || 'auto';
+    var resolved = t === 'auto' ? (media && media.matches ? 'light' : 'dark') : t;
+    document.documentElement.setAttribute('data-theme', resolved);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', resolved === 'light' ? '#fdf7f1' : '#151221');
+    els.btnTheme.textContent = t === 'auto' ? '🌗' : t === 'light' ? '☀️' : '🌙';
+    els.btnTheme.title = '主题：' + (t === 'auto' ? '跟随系统' : t === 'light' ? '浅色' : '深色');
+  }
+
+  function cycleTheme() {
+    var order = ['auto', 'dark', 'light'];
+    var i = order.indexOf(S.settings.theme || 'auto');
+    S.setSetting('theme', order[(i + 1) % order.length]);
+    applyTheme();
+    UI.toast('主题：' + ({ auto: '跟随系统', dark: '深色', light: '浅色' })[S.settings.theme]);
+  }
+
+  /* ============================== 标签页 ============================== */
+
+  function switchTab(name) {
+    U.$$('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
+    U.$$('.pane').forEach(function (p) { p.classList.toggle('active', p.dataset.pane === name); });
+  }
+
+  /* ============================== 菜品列表 ============================== */
+
+  function renderList() {
+    var list = els.catList;
+    U.clear(list);
+    var groups = S.groups();
+    var total = S.data.items.length;
+
+    if (!total) {
+      list.appendChild(el('div', {
+        class: 'empty-tip',
+        html: '还没有菜品～<br>在上面输入菜名回车就能加，或者去「📷 拍照识别」拍一张食堂菜牌。',
+      }));
+      return;
+    }
+
+    var visible = groups.filter(function (g) { return g.items.length || !g.virtual; });
+
+    visible.forEach(function (g) {
+      if (g.virtual && !g.items.length) return;
+      var onCount = g.items.filter(function (i) { return i.enabled; }).length;
+      var allOn = g.items.length > 0 && onCount === g.items.length;
+      var someOn = onCount > 0 && !allOn;
+
+      var headBox = el('input', { type: 'checkbox', checked: allOn });
+      headBox.indeterminate = someOn;
+      headBox.addEventListener('click', function (e) {
+        e.stopPropagation();
+        S.setManyEnabled(g.items.map(function (i) { return i.id; }), !allOn);
+      });
+
+      var head = el('div', { class: 'cat-head', onclick: function (e) {
+        if (e.target.closest('button') || e.target === headBox) return;
+        S.toggleCollapse(g.id);
+      } }, [
+        headBox,
+        el('span', { class: 'cat-name', text: g.name }),
+        el('span', { class: 'cat-count', text: onCount + '/' + g.items.length }),
+      ]);
+
+      if (!g.virtual) {
+        head.appendChild(el('button', { class: 'mini', title: '重命名', text: '✏️', onclick: function (e) { e.stopPropagation(); editCategory(g.id); } }));
+        head.appendChild(el('button', { class: 'mini danger', title: '删除大类', text: '🗑', onclick: function (e) { e.stopPropagation(); deleteCategory(g.id); } }));
+      }
+      head.appendChild(el('span', { class: 'chev', text: '▾' }));
+
+      var itemsBox = el('div', { class: 'cat-items' });
+      g.items.forEach(function (it) {
+        var cb = el('input', { type: 'checkbox', checked: it.enabled });
+        cb.addEventListener('change', function () { S.setEnabled(it.id, cb.checked); });
+        var row = el('div', { class: 'cat-item' + (it.enabled ? '' : ' off') }, [
+          cb,
+          el('span', { class: 'item-name', text: it.name, title: it.name, onclick: function () { S.setEnabled(it.id, !it.enabled); } }),
+          el('button', { class: 'mini', title: '只转这一道', text: '🎯', onclick: function () { solo(it.id); } }),
+          el('button', { class: 'mini', title: '编辑', text: '✏️', onclick: function () { editItem(it.id); } }),
+          el('button', { class: 'mini danger', title: '删除', text: '🗑', onclick: function () { S.removeItem(it.id); UI.toast('已删除「' + it.name + '」'); } }),
+        ]);
+        itemsBox.appendChild(row);
+      });
+
+      var group = el('div', { class: 'cat-group' + (g.collapsed ? ' collapsed' : '') }, [head, itemsBox]);
+      list.appendChild(group);
+    });
+  }
+
+  function solo(id) {
+    S.soloItem(id);
+    var it = S.findItem(id);
+    switchTab('food');
+    UI.toast('转盘上只留「' + (it ? it.name : '') + '」，转吧！');
+    setTimeout(spin, 260);
+  }
+
+  function editItem(id) {
+    var it = S.findItem(id);
+    if (!it) return;
+    var options = [{ value: '', label: '（未分类）' }].concat(S.data.categories.map(function (c) { return { value: c.id, label: c.name }; }));
+    UI.form({
+      title: '编辑菜品',
+      fields: [
+        { key: 'name', label: '菜名', value: it.name },
+        { key: 'categoryId', label: '归属大类', type: 'select', options: options, value: it.categoryId || '' },
+      ],
+      extra: [{ text: '删除', danger: true, value: 'delete' }],
+      okText: '保存',
+    }).then(function (res) {
+      if (!res) return;
+      if (res.action === 'delete') { S.removeItem(id); UI.toast('已删除'); return; }
+      S.updateItem(id, { name: res.values.name, categoryId: res.values.categoryId || null });
+      UI.toast('已保存');
+    });
+  }
+
+  function editCategory(id) {
+    var cat = S.findCategory(id);
+    if (!cat) return;
+    UI.form({
+      title: '重命名大类',
+      hint: '改成一个已有大类的名字，会把两个大类合并。',
+      fields: [{ key: 'name', label: '大类名', value: cat.name }],
+      okText: '保存',
+    }).then(function (res) {
+      if (!res) return;
+      S.renameCategory(id, res.values.name);
+      UI.toast('已保存');
+    });
+  }
+
+  function deleteCategory(id) {
+    var cat = S.findCategory(id);
+    if (!cat) return;
+    var count = S.itemsOf(id).length;
+    UI.open({
+      title: '删除大类「' + cat.name + '」',
+      body: count
+        ? '这个大下面还有 ' + count + ' 道菜。你可以只解散大类（菜会回到「未分类」），也可以连菜一起删掉。'
+        : '这个大下面没有菜。',
+      actions: count
+        ? [
+            { text: '取消', value: null },
+            { text: '只解散大类', value: 'keep' },
+            { text: '连菜一起删', value: 'delete', danger: true },
+          ]
+        : [
+            { text: '取消', value: null },
+            { text: '删除', value: 'delete', danger: true },
+          ],
+    }).then(function (v) {
+      if (!v) return;
+      S.removeCategory(id, v === 'delete' ? 'delete' : 'keep');
+      UI.toast('已删除大类「' + cat.name + '」');
+    });
+  }
+
+  /* ============================== 添加菜品 ============================== */
+
+  function parseNames(raw) {
+    return String(raw || '')
+      .split(/[\n\r,，、;；|]+/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+  }
+
+  /** 真正把菜名写进数据，返回统计结果 */
+  function addNames(raw) {
+    var names = parseNames(raw);
+    var added = 0, dup = 0, grouped = [];
+    names.forEach(function (name) {
+      if (S.itemByName(name)) { dup++; return; }
+      var sug = W.Classify.suggestForNew(name, S.data.items, S.data.categories);
+      var catId = null;
+      if (sug && sug.categoryId) {
+        catId = sug.categoryId;
+      } else if (sug && sug.newCategoryName) {
+        var cat = S.addCategory(sug.newCategoryName, true);
+        catId = cat.id;
+        S.data.items.forEach(function (it) {
+          if (it.id === sug.mateItemId && !it.categoryId) it.categoryId = cat.id;
+        });
+        grouped.push(sug.newCategoryName);
+      }
+      S.addItem(name, catId, true);
+      added++;
+    });
+    if (added) { S.save(true); S.emit(); }
+    return { added: added, dup: dup, grouped: grouped };
+  }
+
+  function addResultToast(r, silent) {
+    if (!r.added && !r.dup) { if (!silent) UI.toast('先输入菜名吧', 'err'); return; }
+    var msg = [];
+    if (r.added) msg.push('加了 ' + r.added + ' 道');
+    if (r.grouped.length) msg.push('自动新建大类：' + r.grouped.join('、'));
+    if (r.dup) msg.push(r.dup + ' 道已存在');
+    UI.toast(msg.join('，'), r.added ? 'ok' : 'err');
+  }
+
+  function doAdd() {
+    var r = addNames(els.addInput.value);
+    if (!r.added && !r.dup) { UI.toast('先输入菜名吧', 'err'); return; }
+    els.addInput.value = '';
+    els.addInput.focus();
+    addResultToast(r);
+  }
+
+  /**
+   * 粘贴多行：`<input>` 会把换行符吃掉（HTML 规范里的 value 清洗算法），
+   * 所以多行粘贴必须自己接管，否则「一行一个」根本用不了。
+   */
+  function onPaste(e) {
+    var text = '';
+    try {
+      var cb = e.clipboardData || global.clipboardData;
+      text = cb ? cb.getData('text') : '';
+    } catch (err) { return; }
+    if (!text || !/[\n\r]/.test(text)) return;
+    e.preventDefault();
+    var merged = (els.addInput.value ? els.addInput.value + '\n' : '') + text;
+    var r = addNames(merged);
+    els.addInput.value = '';
+    els.addInput.focus();
+    addResultToast(r);
+  }
+
+  function doSmartGroup() {
+    if (!S.data.items.length) { UI.toast('还没有菜品', 'err'); return; }
+    var plan = W.Classify.planAll(S.data.items, S.data.categories);
+    var idMap = {};
+    plan.created.forEach(function (c) {
+      var cat = S.addCategory(c.name, true);
+      if (cat) idMap[c.id] = cat.id;
+    });
+    var moved = 0;
+    S.data.items.forEach(function (it) {
+      var cid = plan.assign[it.id];
+      if (!cid) return;
+      if (idMap[cid]) cid = idMap[cid];
+      if (it.categoryId !== cid) { it.categoryId = cid; moved++; }
+    });
+    S.save(true); S.emit();
+    var created = plan.created.length;
+    if (!moved && !created) UI.toast('没找到可以自动归类的规律，可以手动编辑大类');
+    else UI.toast('归好 ' + moved + ' 道菜' + (created ? '，新建了 ' + created + ' 个大类' : ''), 'ok');
+  }
+
+  /* ============================== 转盘 ============================== */
+
+  function syncWheel() {
+    var items = S.enabledItems();
+    wheel.setItems(items);
+    els.spinSub.textContent = items.length + ' 个';
+    els.btnSpin.disabled = items.length === 0 || wheel.spinning;
+  }
+
+  function spin() {
+    var items = S.enabledItems();
+    if (!items.length) {
+      UI.toast('转盘上还没有菜，先去「菜品」里加几个', 'err');
+      switchTab('food');
+      return;
+    }
+    if (wheel.spinning) return;
+    wheel.setItems(items);
+    els.resultCard.hidden = true;
+    els.resultEmpty.hidden = false;
+    els.btnSpin.disabled = true;
+    W.Sound.enabled = !!S.settings.sound;
+    els.btnSpin.classList.add('spinning');
+
+    wheel.spin({ duration: S.settings.duration, sound: !!S.settings.sound }).then(function (res) {
+      els.btnSpin.classList.remove('spinning');
+      els.btnSpin.disabled = false;
+      if (!res) return;
+      showResult(res.item);
+      S.addHistory(res.item.name);
+      if (S.settings.confetti) UI.confetti();
+      if (S.settings.removeAfterPick) {
+        setTimeout(function () { S.setEnabled(res.item.id, false); }, 1400);
+      }
+    });
+  }
+
+  function showResult(item) {
+    lastPicked = item;
+    var cat = item.categoryId ? S.findCategory(item.categoryId) : null;
+    els.resultName.textContent = item.name;
+    els.resultCat.textContent = cat ? '大类：' + cat.name : '';
+    els.resultEmpty.hidden = true;
+    els.resultCard.hidden = false;
+    els.resultCard.style.animation = 'none';
+    void els.resultCard.offsetWidth;
+    els.resultCard.style.animation = '';
+  }
+
+  function renderHistory() {
+    var box = els.history;
+    U.clear(box);
+    var list = (S.data.history || []).slice(0, 6);
+    if (!list.length) return;
+    box.appendChild(el('span', { class: 'history-chip', text: '最近：' }));
+    list.forEach(function (n) {
+      box.appendChild(el('span', { class: 'history-chip', text: n }));
+    });
+  }
+
+  /* ============================== 拍照识别 ============================== */
+
+  function setStatus(text, kind) {
+    var box = els.photoStatus;
+    U.clear(box);
+    if (!text) { box.hidden = true; return; }
+    box.hidden = false;
+    box.className = 'status' + (kind ? ' ' + kind : '');
+    if (kind === 'loading') box.appendChild(el('span', { class: 'spinner' }));
+    box.appendChild(el('span', { text: text }));
+  }
+
+  function renderPreview() {
+    var box = els.photoPreview;
+    U.clear(box);
+    if (!photoFiles.length) { box.hidden = true; return; }
+    box.hidden = false;
+    photoFiles.forEach(function (url) {
+      box.appendChild(el('img', { src: url, alt: '待识别的照片' }));
+    });
+  }
+
+  function handleFiles(files) {
+    files = (files || []).filter(function (f) { return /^image\//.test(f.type || ''); });
+    if (!files.length) { UI.toast('没有选到图片', 'err'); return; }
+    files = files.slice(0, 4);
+
+    els.recognized.hidden = true;
+    recognizedDishes = [];
+    setStatus('正在压缩图片…', 'loading');
+
+    Promise.all(files.map(function (f) { return U.compressImage(f, 1280, 0.85); }))
+      .then(function (urls) {
+        photoFiles = urls;
+        renderPreview();
+        var v = S.settings.vision;
+        if (!v.apiKey) throw new Error('还没有配置视觉模型 API Key。去「⚙️ 设置」填一下，或者手动在「菜品」里输入菜名。');
+        setStatus('正在识别（大约 5~20 秒）…', 'loading');
+        return W.Vision.recognize(S.settings, urls, function (t) { setStatus(t, 'loading'); });
+      })
+      .then(function (res) {
+        recognizedDishes = res.dishes || [];
+        if (!recognizedDishes.length) {
+          setStatus('这张照片里没认出菜品，换一张更清楚的菜牌试试～', 'err');
+          return;
+        }
+        setStatus('认出 ' + recognizedDishes.length + ' 道菜，确认一下再加进转盘：', 'ok');
+        renderRecognized();
+      })
+      .catch(function (err) {
+        setStatus((err && err.message) || String(err), 'err');
+      });
+  }
+
+  function renderRecognized() {
+    var box = els.recognized;
+    U.clear(box);
+    if (!recognizedDishes.length) { box.hidden = true; return; }
+    box.hidden = false;
+
+    var datalist = el('datalist', { id: 'cat-options' });
+    S.data.categories.forEach(function (c) { datalist.appendChild(el('option', { value: c.name })); });
+    box.appendChild(datalist);
+
+    box.appendChild(el('div', { class: 'rec-head' }, [
+      el('span', { text: '识别结果（可改名字、可改大类）' }),
+    ]));
+
+    recognizedDishes.forEach(function (d, idx) {
+      var nameInput = el('input', { class: 'input rec-name', type: 'text', value: d.name });
+      var catInput = el('input', { class: 'input rec-cat', type: 'text', list: 'cat-options', value: d.category || '', placeholder: '大类' });
+      nameInput.addEventListener('input', function () { d.name = nameInput.value; });
+      catInput.addEventListener('input', function () { d.category = catInput.value; });
+      var row = el('div', { class: 'rec-row' }, [
+        nameInput,
+        catInput,
+        el('button', { class: 'mini danger', text: '✕', title: '不要这道', onclick: function () {
+          recognizedDishes.splice(idx, 1);
+          renderRecognized();
+        } }),
+      ]);
+      box.appendChild(row);
+    });
+
+    box.appendChild(el('div', { class: 'rec-actions' }, [
+      el('button', { class: 'btn primary', text: '全部加入转盘', onclick: commitRecognized }),
+      el('button', { class: 'btn ghost', text: '都不要', onclick: function () {
+        recognizedDishes = [];
+        renderRecognized();
+        setStatus('已取消', null);
+      } }),
+    ]));
+  }
+
+  function commitRecognized() {
+    var added = 0, dup = 0, newCats = [];
+    recognizedDishes.forEach(function (d) {
+      var name = String(d.name || '').trim();
+      if (!name) return;
+      if (S.itemByName(name)) { dup++; return; }
+      var catId = null;
+      var catName = String(d.category || '').trim();
+      if (catName) {
+        var existed = S.categoryByName(catName);
+        var cat = S.addCategory(catName, true);
+        catId = cat ? cat.id : null;
+        if (!existed && cat) newCats.push(catName);
+      }
+      S.addItem(name, catId, true);
+      added++;
+    });
+    S.save(true); S.emit();
+    recognizedDishes = [];
+    renderRecognized();
+    setStatus('已加入 ' + added + ' 道菜' + (newCats.length ? '，新建大类：' + newCats.join('、') : ''), 'ok');
+    UI.toast('加了 ' + added + ' 道菜' + (dup ? '，' + dup + ' 道重复已跳过' : ''), 'ok');
+    setTimeout(function () { switchTab('food'); }, 400);
+  }
+
+  /* ============================== 设置页 ============================== */
+
+  function fillProviders() {
+    var sel = els.setProvider;
+    U.clear(sel);
+    S.PROVIDERS.forEach(function (p) {
+      sel.appendChild(el('option', { value: p.id, text: p.name }));
+    });
+  }
+
+  function syncSettingsUI() {
+    var v = S.settings.vision;
+    els.setProvider.value = v.provider || 'custom';
+    els.setBaseUrl.value = v.baseUrl || '';
+    els.setModel.value = v.model || '';
+    els.setApiKey.value = v.apiKey || '';
+    els.setProxy.checked = !!v.useProxy;
+    var p = null;
+    S.PROVIDERS.forEach(function (x) { if (x.id === v.provider) p = x; });
+    els.providerHint.textContent = p ? p.hint : '';
+
+    els.setSound.checked = !!S.settings.sound;
+    els.setRemove.checked = !!S.settings.removeAfterPick;
+    els.setConfetti.checked = !!S.settings.confetti;
+    els.setDuration.value = S.settings.duration;
+    els.setDurationVal.textContent = Number(S.settings.duration).toFixed(1) + 's';
+    if (location.protocol === 'file:') {
+      els.setProxy.disabled = true;
+      els.setProxy.checked = false;
+      if (v.useProxy) S.setVision({ useProxy: false });
+    }
+    renderStats();
+  }
+
+  function renderStats() {
+    var st = S.stats();
+    var extra = U.storage.ok ? '' : '（注意：当前环境无法写入本地存储，刷新会丢数据，记得用「导出备份」）';
+    els.statHint.textContent = st.items + ' 道菜 · ' + st.categories + ' 个大类 · 转盘上 ' + st.enabled + ' 道' + extra;
+  }
+
+  function saveVisionFromUI() {
+    S.setVision({
+      baseUrl: els.setBaseUrl.value.trim(),
+      model: els.setModel.value.trim(),
+      apiKey: els.setApiKey.value.trim(),
+      useProxy: els.setProxy.checked,
+    });
+  }
+
+  function testConnection() {
+    saveVisionFromUI();
+    var v = S.settings.vision;
+    if (!v.apiKey) { UI.toast('先填 API Key', 'err'); return; }
+    els.btnTest.disabled = true;
+    els.btnTest.textContent = '测试中…';
+    W.Vision.test(S.settings).then(function (r) {
+      UI.toast(r.message, 'ok', 3600);
+    }).catch(function (err) {
+      UI.toast(err.message || String(err), 'err', 6000);
+    }).then(function () {
+      els.btnTest.disabled = false;
+      els.btnTest.textContent = '测试连接';
+    });
+  }
+
+  function exportData() {
+    var data = S.exportObject();
+    U.download('吃啥转盘-备份-' + U.stamp() + '.json', JSON.stringify(data, null, 2));
+    UI.toast('备份已导出', 'ok');
+  }
+
+  function importData() {
+    U.pickFile($('file-import')).then(function (files) {
+      if (!files.length) return;
+      U.readTextFile(files[0]).then(function (text) {
+        var obj;
+        try { obj = JSON.parse(text); }
+        catch (e) { UI.toast('这个文件不是合法 JSON', 'err'); return; }
+        return UI.open({
+          title: '导入备份',
+          body: '导入方式：追加（保留现有菜品，重复的跳过）还是覆盖（清空现有菜品再导入）？',
+          actions: [
+            { text: '取消', value: null },
+            { text: '追加', value: 'append' },
+            { text: '覆盖', value: 'replace', danger: true },
+          ],
+        }).then(function (mode) {
+          if (!mode) return;
+          try {
+            var r = S.importObject(obj, mode);
+            UI.toast('导入完成：新增 ' + r.added + ' 道，跳过重复 ' + r.dup + ' 道', 'ok', 3600);
+          } catch (e) {
+            UI.toast('导入失败：' + e.message, 'err', 5000);
+          }
+        });
+      }).catch(function (e) { UI.toast('读取失败：' + e.message, 'err'); });
+    });
+  }
+
+  function copyData() {
+    var text = JSON.stringify(S.exportObject());
+    function fallback() {
+      UI.form({
+        title: '复制数据',
+        hint: '长按下面的文字全选复制，粘贴到备忘录或聊天窗口保存即可。',
+        fields: [{ key: 'text', label: '备份内容', type: 'textarea', value: text }],
+        okText: '关闭',
+      });
+    }
+    if (global.navigator && global.navigator.clipboard && global.navigator.clipboard.writeText) {
+      global.navigator.clipboard.writeText(text).then(function () { UI.toast('已复制到剪贴板', 'ok'); }, fallback);
+    } else fallback();
+  }
+
+  function resetAll() {
+    UI.open({
+      title: '恢复出厂设置',
+      body: '会清空所有菜品、大类、历史记录和设置（API Key 也会没）。确定吗？',
+      actions: [
+        { text: '取消', value: null },
+        { text: '清空', value: 'yes', danger: true },
+      ],
+    }).then(function (v) {
+      if (v !== 'yes') return;
+      S.resetAll();
+      syncSettingsUI();
+      UI.toast('已清空', 'ok');
+    });
+  }
+
+  /* ============================== 帮助 ============================== */
+
+  function showHelp() {
+    UI.open({
+      title: '怎么用「吃啥转盘」',
+      body: el('div', { html: [
+        '<ul>',
+        '<li><b>加菜</b>：在「🍽 菜品」里打字回车就能加；一行一个可以一次加一串。</li>',
+        '<li><b>大类 / 小项</b>：像「麻辣鸡丁滑蛋饭」「五花肉滑蛋饭」会自动归到「滑蛋饭」这个大类。' +
+          '勾大类 = 把这个大类下的都放上转盘；只勾某一道 = 只转那一道。</li>',
+        '<li><b>智能归类</b>：如果菜名没归好，点一下「✨ 智能归类」，它会按菜名后缀重新分大类。</li>',
+        '<li><b>拍照识别</b>：拍一张食堂菜牌，自动认出菜名再加进转盘。需要先在「⚙️ 设置」里填一个视觉模型的 API Key。</li>',
+        '<li><b>转盘</b>：点中间那个「转」，停下来指到哪道就吃哪道。手机可以直接点转盘中间。</li>',
+        '<li><b>数据在哪</b>：全部存在这台设备本地，不上传。换设备用「设置 → 导出备份 / 导入备份」。</li>',
+        '</ul>',
+        '<p>小技巧：把网页「添加到主屏幕」，就跟装了个 App 一样，全屏、离线都能用。</p>',
+      ].join('') }),
+      actions: [{ text: '开始干饭', primary: true, value: 'ok' }],
+    });
+  }
+
+  /* ============================== 启动 ============================== */
+
+  function cacheEls() {
+    els.btnTheme = $('btn-theme');
+    els.btnHelp = $('btn-help');
+    els.btnSpin = $('btn-spin');
+    els.spinSub = $('spin-sub');
+    els.resultBar = $('result-bar');
+    els.resultEmpty = $('result-empty');
+    els.resultCard = $('result-card');
+    els.resultName = $('result-name');
+    els.resultCat = $('result-cat');
+    els.btnAgain = $('btn-again');
+    els.btnDrop = $('btn-drop');
+    els.history = $('history');
+
+    els.addInput = $('add-input');
+    els.btnAdd = $('btn-add');
+    els.btnSmart = $('btn-smart');
+    els.btnAll = $('btn-all');
+    els.btnNone = $('btn-none');
+    els.btnInvert = $('btn-invert');
+    els.btnClear = $('btn-clear');
+    els.catList = $('cat-list');
+
+    els.btnCamera = $('btn-camera');
+    els.btnAlbum = $('btn-album');
+    els.fileCamera = $('file-camera');
+    els.fileAlbum = $('file-album');
+    els.photoPreview = $('photo-preview');
+    els.photoStatus = $('photo-status');
+    els.recognized = $('recognized');
+
+    els.setProvider = $('set-provider');
+    els.providerHint = $('provider-hint');
+    els.setBaseUrl = $('set-baseurl');
+    els.setModel = $('set-model');
+    els.setApiKey = $('set-apikey');
+    els.setProxy = $('set-proxy');
+    els.btnEye = $('btn-eye');
+    els.btnTest = $('btn-test');
+    els.btnSaveVision = $('btn-save-vision');
+    els.setSound = $('set-sound');
+    els.setRemove = $('set-remove');
+    els.setConfetti = $('set-confetti');
+    els.setDuration = $('set-duration');
+    els.setDurationVal = $('set-duration-val');
+    els.btnExport = $('btn-export');
+    els.btnImport = $('btn-import');
+    els.btnCopy = $('btn-copy');
+    els.btnReset = $('btn-reset');
+    els.statHint = $('stat-hint');
+  }
+
+  function bind() {
+    els.btnTheme.addEventListener('click', cycleTheme);
+    els.btnHelp.addEventListener('click', showHelp);
+
+    U.$$('.tab').forEach(function (t) {
+      t.addEventListener('click', function () { switchTab(t.dataset.tab); });
+    });
+
+    els.btnSpin.addEventListener('click', spin);
+    els.btnAgain.addEventListener('click', spin);
+    els.btnDrop.addEventListener('click', function () {
+      if (!lastPicked) return;
+      S.setEnabled(lastPicked.id, false);
+      UI.toast('「' + lastPicked.name + '」已从转盘移除');
+      els.resultCard.hidden = true;
+      els.resultEmpty.hidden = false;
+      lastPicked = null;
+    });
+
+    els.btnAdd.addEventListener('click', doAdd);
+    els.addInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doAdd(); }
+    });
+    els.addInput.addEventListener('paste', onPaste);
+    els.btnSmart.addEventListener('click', doSmartGroup);
+    els.btnAll.addEventListener('click', function () { S.setAllEnabled(true); });
+    els.btnNone.addEventListener('click', function () { S.setAllEnabled(false); });
+    els.btnInvert.addEventListener('click', function () { S.invertEnabled(); });
+    els.btnClear.addEventListener('click', function () {
+      if (!S.data.items.length) { UI.toast('已经是空的'); return; }
+      UI.open({
+        title: '清空所有菜品',
+        body: '会删掉全部 ' + S.data.items.length + ' 道菜（大类保留）。确定吗？',
+        actions: [{ text: '取消', value: null }, { text: '清空', value: 'yes', danger: true }],
+      }).then(function (v) { if (v === 'yes') { S.clearItems(); UI.toast('已清空', 'ok'); } });
+    });
+
+    els.btnCamera.addEventListener('click', function () {
+      U.pickFile(els.fileCamera).then(handleFiles);
+    });
+    els.btnAlbum.addEventListener('click', function () {
+      U.pickFile(els.fileAlbum).then(handleFiles);
+    });
+
+    els.setProvider.addEventListener('change', function () {
+      var p = S.applyProvider(els.setProvider.value);
+      syncSettingsUI();
+      if (p && !p.baseUrl) UI.toast('这是自定义服务商，手动填接口地址和模型名');
+    });
+    [els.setBaseUrl, els.setModel, els.setApiKey].forEach(function (node) {
+      node.addEventListener('change', saveVisionFromUI);
+      node.addEventListener('blur', saveVisionFromUI);
+    });
+    els.setProxy.addEventListener('change', function () {
+      saveVisionFromUI();
+      UI.toast(els.setProxy.checked ? '已开启本地代理' : '已关闭本地代理');
+    });
+    els.btnEye.addEventListener('click', function () {
+      els.setApiKey.type = els.setApiKey.type === 'password' ? 'text' : 'password';
+    });
+    els.btnTest.addEventListener('click', testConnection);
+    els.btnSaveVision.addEventListener('click', function () { saveVisionFromUI(); UI.toast('已保存', 'ok'); });
+
+    els.setSound.addEventListener('change', function () { S.setSetting('sound', els.setSound.checked); });
+    els.setRemove.addEventListener('change', function () { S.setSetting('removeAfterPick', els.setRemove.checked); });
+    els.setConfetti.addEventListener('change', function () { S.setSetting('confetti', els.setConfetti.checked); });
+    els.setDuration.addEventListener('input', function () {
+      els.setDurationVal.textContent = Number(els.setDuration.value).toFixed(1) + 's';
+    });
+    els.setDuration.addEventListener('change', function () { S.setSetting('duration', Number(els.setDuration.value)); });
+
+    els.btnExport.addEventListener('click', exportData);
+    els.btnImport.addEventListener('click', importData);
+    els.btnCopy.addEventListener('click', copyData);
+    els.btnReset.addEventListener('click', resetAll);
+
+    // 空格键转一把
+    document.addEventListener('keydown', function (e) {
+      var tag = (e.target && e.target.tagName) || '';
+      if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+      if (e.code === 'Space' || e.key === ' ') {
+        if (!els.resultCard.hidden) return;
+        e.preventDefault();
+        spin();
+      }
+    });
+
+    if (media && media.addEventListener) {
+      media.addEventListener('change', function () { if ((S.settings.theme || 'auto') === 'auto') applyTheme(); });
+    }
+  }
+
+  function boot() {
+    cacheEls();
+
+    // 兜底：任何未捕获的错误都先把遮罩关掉。
+    // 手机上的报错我这边看不到，但至少要保证「出错了还能继续点」，而不是整个界面卡死。
+    global.addEventListener('error', function (e) {
+      if (e && (e.error || typeof e.message === 'string') && e.message) UI.panic(e.error || e.message);
+    });
+    global.addEventListener('unhandledrejection', function (e) { UI.panic(e && e.reason); });
+
+    UI.init();
+    S.load();
+    applyTheme();
+    fillProviders();
+
+    wheel = new W.Wheel($('wheel'));
+    W.Sound.enabled = !!S.settings.sound;
+
+    var wrap = document.querySelector('.wheel-wrap');
+    if (global.ResizeObserver) {
+      new global.ResizeObserver(function () { wheel.resize(); }).observe(wrap);
+    } else {
+      global.addEventListener('resize', function () { wheel.resize(); });
+    }
+
+    S.on(function () {
+      syncWheel();
+      renderList();
+      renderHistory();
+      renderStats();
+    });
+
+    bind();
+    syncSettingsUI();
+    syncWheel();
+    renderList();
+    renderHistory();
+    renderStats();
+    setTimeout(function () { wheel.resize(); }, 60);
+
+    var seenHelp = false;
+    try {
+      seenHelp = !!global.localStorage.getItem('wtw-seen-help');
+      if (!seenHelp) global.localStorage.setItem('wtw-seen-help', '1');
+    } catch (e) { seenHelp = true; /* 存储不可用就别弹了 */ }
+    if (!seenHelp) setTimeout(showHelp, 500);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})(window);
+
+</script>
+</body>
+</html>

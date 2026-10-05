@@ -1,0 +1,13 @@
+{
+  "appId": "com.mengxiangbaofu.whattoeatwheel",
+  "appName": "吃啥转盘",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#151221"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
