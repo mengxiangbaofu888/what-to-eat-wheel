@@ -29,6 +29,7 @@ release/
 
 # 杂项
 *.log
+.commit-msg.txt
 .DS_Store
 Thumbs.db
 dist-preview/

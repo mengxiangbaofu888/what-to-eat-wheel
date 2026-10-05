@@ -750,6 +750,14 @@
 
   function boot() {
     cacheEls();
+
+    // 兜底：任何未捕获的错误都先把遮罩关掉。
+    // 手机上的报错我这边看不到，但至少要保证「出错了还能继续点」，而不是整个界面卡死。
+    global.addEventListener('error', function (e) {
+      if (e && (e.error || typeof e.message === 'string') && e.message) UI.panic(e.error || e.message);
+    });
+    global.addEventListener('unhandledrejection', function (e) { UI.panic(e && e.reason); });
+
     UI.init();
     S.load();
     applyTheme();

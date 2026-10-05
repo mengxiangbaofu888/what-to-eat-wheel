@@ -15,12 +15,22 @@
     mask = U.$('#modal-mask');
     modalBox = U.$('#modal');
     toastWrap = U.$('#toast-wrap');
+    // 点遮罩上的任何地方都能关（除了点在弹窗里的控件上）。
+    // 以前只认「点中的正好是遮罩本身」，一旦弹窗内容出问题，用户就会觉得整个 App 点不动。
     mask.addEventListener('click', function (e) {
-      if (e.target === mask && current && current.dismissible) current.close(null);
+      if (!current || !current.dismissible) return;
+      if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, label, a')) return;
+      current.close(null);
     });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && current && current.dismissible) current.close(null);
     });
+
+    // 自检：遮罩可见但里面没有任何内容 = 一定是出问题了。
+    // 与其让用户面对一个点不动的界面，不如自己把它关掉。
+    setInterval(function () {
+      if (mask && !mask.hidden && !modalBox.childNodes.length) closeModal();
+    }, 400);
   }
 
   var current = null;
@@ -28,8 +38,17 @@
   function closeModal() {
     if (!mask) return;
     mask.hidden = true;
+    mask.style.display = 'none';   // 内联样式优先级最高，不依赖 CSS 里那条 [hidden] 规则
     U.clear(modalBox);
     current = null;
+  }
+
+  /** 兜底：任何未捕获的错误都不该让界面卡死，先保证遮罩能关掉 */
+  function panic(err) {
+    try {
+      closeModal();
+      toast('出错了：' + ((err && err.message) || err), 'err', 6000);
+    } catch (e) { /* 兜底逻辑本身不能再抛错 */ }
   }
 
   /**
@@ -54,6 +73,7 @@
       });
       modalBox.appendChild(row);
       mask.hidden = false;
+      mask.style.display = 'grid';   // 同上，双保险
       current = {
         dismissible: opts.dismissible !== false,
         close: function (value) { closeModal(); resolve(value); },
@@ -124,6 +144,7 @@
       });
       modalBox.appendChild(row);
       mask.hidden = false;
+      mask.style.display = 'grid';
 
       function collect() {
         var values = {};
@@ -235,5 +256,5 @@
     confettiRaf = global.requestAnimationFrame(frame);
   }
 
-  W.UI = { init: init, open: open, form: form, toast: toast, confetti: confetti, close: closeModal };
+  W.UI = { init: init, open: open, form: form, toast: toast, confetti: confetti, close: closeModal, panic: panic };
 })(window);

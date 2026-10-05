@@ -37,6 +37,9 @@ const dom = new JSDOM(html, {
   url: 'https://localhost/',
   virtualConsole,
   beforeParse(window) {
+    // 标记「已经看过帮助」，免得启动 500ms 后的自动弹窗在测试中途冒出来打乱节奏
+    try { window.localStorage.setItem('wtw-seen-help', '1'); } catch { /* ignore */ }
+
     // ---- 假 canvas ----
     const noop = () => {};
     const fakeCtx = {
@@ -116,6 +119,36 @@ else ok('转盘计数', '7 个');
 const canvas = $('#wheel');
 if (!canvas.width || canvas.width < 100) bad('转盘画布尺寸', `canvas.width=${canvas.width}`);
 else ok('转盘画布尺寸', `${canvas.width}×${canvas.height}`);
+
+/* ---------------- 遮罩：曾经的致命 bug ---------------- */
+
+// 线上出过一次「一打开就卡死」：`.modal-mask { display: grid }` 的优先级压过了
+// 浏览器默认的 `[hidden] { display: none }`，于是遮罩从一开始就盖在整个界面上，
+// 里面还是个空弹窗，点哪儿都没反应。
+// jsdom 不做完整的 CSS 层叠（它两种情况都返回 none），复现不了这个 bug，
+// 所以这里退一步：静态检查兜底规则还在，再真开一次弹窗确认有内容、点遮罩能关掉。
+const cssText = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+if (!/\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(cssText)) {
+  bad('CSS 兜底规则 [hidden]', '缺少 [hidden] { display: none !important }，遮罩会一直盖住整个界面');
+} else {
+  ok('CSS 兜底规则 [hidden]', '[hidden] { display: none !important }');
+}
+
+const maskEl = $('#modal-mask');
+const modalEl = $('#modal');
+if (!maskEl.hidden) bad('刚启动时遮罩必须是关的', 'mask.hidden 是 false，界面会被挡住');
+else ok('刚启动时遮罩必须是关的');
+
+click($('#btn-help'));
+await wait(60);
+if (maskEl.hidden) bad('帮助弹窗能打开', 'mask 还是 hidden');
+else if (!modalEl.childNodes.length) bad('帮助弹窗必须有内容', '弹窗是空的——这就是「一进去就卡死」的那个 bug');
+else ok('帮助弹窗有内容', JSON.stringify(modalEl.textContent.slice(0, 16) + '…'));
+
+click(maskEl);   // 点遮罩上的空白处应该能关掉
+await wait(60);
+if (!maskEl.hidden) bad('点遮罩空白处能关掉弹窗', '关不掉就会把界面彻底卡死');
+else ok('点遮罩空白处能关掉弹窗');
 
 /* ---------------- 添加 / 归类 ---------------- */
 

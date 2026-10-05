@@ -134,7 +134,8 @@ const authorIdent = parseIdent('author');
 const committerIdent = parseIdent('committer');
 const author = { name: authorIdent.name, email: authorIdent.email, date: isoWithOffset(authorIdent.ts, authorIdent.tz) };
 const committer = { name: committerIdent.name, email: committerIdent.email, date: isoWithOffset(committerIdent.ts, committerIdent.tz) };
-const hasParent = headerLines.some((l) => l.startsWith('parent '));
+// 父提交必须显式传：不传的话 GitHub 会建成**根提交**，SHA 就永远对不上本地了（踩过）。
+const parents = headerLines.filter((l) => l.startsWith('parent ')).map((l) => l.slice('parent '.length).trim());
 
 // git ls-files -s -z → "<mode> <sha> <stage>\t<path>\0"
 const entries = git(['ls-files', '-s', '-z'], { buffer: true })
@@ -247,7 +248,7 @@ const commit = await api('POST', `/repos/${OWNER}/${REPO}/git/commits`, {
   tree: remoteTree.sha,
   author,
   committer,
-  ...(hasParent ? {} : { parents: [] }),   // 显式声明根提交，别让 GitHub 自动挂到当前 HEAD 上
+  parents,   // 根提交就是 []；有父提交就必须原样带上，否则 SHA 对不上
 });
 console.log(`\n⑤ commit ${commit.sha.slice(0, 10)} ${commit.sha === headSha ? '✅ 与本地 SHA 完全相同' : '（与本地 SHA 不同，但 tree 一致＝文件内容逐字节相同）'}`);
 
@@ -287,10 +288,22 @@ if (repoInfo.default_branch !== BRANCH) {
 if (WITH_RELEASE) {
   const apk = join(ROOT, 'release', `吃啥转盘-${TAG}-debug.apk`);
   const repoUrl = `https://github.com/${OWNER}/${REPO}`;
+
+  // 更新日志里对应这一版的段落，直接贴进 Release 说明
+  let changelog = '';
+  const changelogFile = join(ROOT, 'docs', '更新日志.md');
+  if (existsSync(changelogFile)) {
+    const lines = readFileSync(changelogFile, 'utf8').split('\n');
+    const start = lines.findIndex((l) => l.trim().startsWith(`## ${TAG}`));
+    if (start >= 0) {
+      const rest = lines.slice(start + 1);
+      const end = rest.findIndex((l) => l.trim().startsWith('## '));
+      changelog = (end >= 0 ? rest.slice(0, end) : rest).join('\n').trim();
+    }
+  }
+
   const releaseBody = [
-    `## 吃啥转盘 ${TAG}`,
-    '',
-    '自定义菜名 + 智能分类 + 拍照识别 + 随机转盘，转到哪道就吃哪道。',
+    changelog || `## 吃啥转盘 ${TAG}`,
     '',
     '### 下载',
     `- **\`what-to-eat-wheel-${TAG}-debug.apk\`** —— 安卓安装包（Android 7.0+，自签名，首次安装需允许「安装未知来源应用」）`,
@@ -300,7 +313,7 @@ if (WITH_RELEASE) {
     '在应用内「设置」里填一个视觉模型的 API Key（预置了智谱 / 硅基流动等，都有免费额度）。',
     '不配也不影响手动加菜和转盘。',
     '',
-    `详见 [README](${repoUrl}#readme) 与 [使用说明](${repoUrl}/blob/${BRANCH}/docs/使用说明.md)。`,
+    `详见 [README](${repoUrl}#readme)、[使用说明](${repoUrl}/blob/${BRANCH}/docs/使用说明.md)、[更新日志](${repoUrl}/blob/${BRANCH}/docs/更新日志.md)。`,
   ].join('\n');
 
   let release = null;

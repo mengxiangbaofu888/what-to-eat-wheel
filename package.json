@@ -1,6 +1,6 @@
 {
   "name": "what-to-eat-wheel",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "吃啥转盘 · 自定义菜名 + 拍照识别食堂菜品 + 大类/小项多选 + 转盘随机决定今天吃啥",

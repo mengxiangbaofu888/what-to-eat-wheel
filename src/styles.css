@@ -40,6 +40,16 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/*
+ * 必须放在最前面，而且必须带 !important。
+ * 浏览器的默认样式里 `[hidden] { display: none }` 只是一个**元素选择器**；
+ * 我们后面写了 `.modal-mask { display: grid }` 这种类选择器，优先级更高，
+ * 会把 hidden 直接压掉——结果就是遮罩从一开始就一直盖在整个界面上，
+ * 里面还是个空弹窗，点哪儿都没反应，看起来就像「一打开就卡死」。
+ * （这个坑 jsdom 测不出来，因为 jsdom 不做完整的 CSS 层叠。）
+ */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
