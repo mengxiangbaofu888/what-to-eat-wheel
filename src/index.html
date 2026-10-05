@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>吃啥转盘 · 今天吃啥交给它</title>
+<meta name="description" content="自定义菜名、拍照识别食堂菜品、按大类/小项挑菜，转盘随机决定今天吃什么。">
+<meta name="theme-color" content="#151221">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23ff8a3d'/%3E%3Cpath d='M32 32 L32 4 A28 28 0 0 1 56.2 18 Z' fill='%23ffd166'/%3E%3Cpath d='M32 32 L56.2 18 A28 28 0 0 1 56.2 46 Z' fill='%23ef476f'/%3E%3Cpath d='M32 32 L56.2 46 A28 28 0 0 1 32 60 Z' fill='%2306d6a0'/%3E%3Cpath d='M32 32 L32 60 A28 28 0 0 1 7.8 46 Z' fill='%234cc9f0'/%3E%3Cpath d='M32 32 L7.8 46 A28 28 0 0 1 7.8 18 Z' fill='%23845ec2'/%3E%3Cpath d='M32 32 L7.8 18 A28 28 0 0 1 32 4 Z' fill='%23f78c6b'/%3E%3Ccircle cx='32' cy='32' r='7' fill='%23fff'/%3E%3C/svg%3E">
+<!-- INLINE:styles.css -->
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-dot"></span>吃啥转盘</div>
+    <div class="top-actions">
+      <button class="icon-btn" id="btn-theme" title="切换主题" aria-label="切换主题">🌗</button>
+      <button class="icon-btn" id="btn-help" title="使用说明" aria-label="使用说明">？</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="wheel-wrap">
+      <div class="pointer" aria-hidden="true"></div>
+      <canvas id="wheel" aria-label="选择转盘"></canvas>
+      <button class="spin-btn" id="btn-spin" aria-label="开始转动">
+        <span class="spin-btn-main">转</span>
+        <span class="spin-btn-sub" id="spin-sub">0 个</span>
+      </button>
+    </div>
+
+    <div class="result-bar" id="result-bar">
+      <div class="result-empty" id="result-empty">转一下，让天意决定今天吃啥 🍚</div>
+      <div class="result-card" id="result-card" hidden>
+        <div class="result-label">今天就吃</div>
+        <div class="result-name" id="result-name">—</div>
+        <div class="result-cat" id="result-cat"></div>
+        <div class="result-actions">
+          <button class="btn ghost sm" id="btn-again">再转一次</button>
+          <button class="btn ghost sm" id="btn-drop">从转盘移除</button>
+        </div>
+      </div>
+      <div class="history" id="history"></div>
+    </div>
+  </main>
+
+  <section class="panel">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="food" role="tab">🍽 菜品</button>
+      <button class="tab" data-tab="photo" role="tab">📷 拍照识别</button>
+      <button class="tab" data-tab="settings" role="tab">⚙️ 设置</button>
+    </nav>
+
+    <div class="tab-body">
+
+      <!-- ============ 菜品 ============ -->
+      <div class="pane active" data-pane="food">
+        <div class="add-row">
+          <input id="add-input" class="input" type="text" placeholder="输入菜名，回车添加（可粘贴多行，一行一个）" autocomplete="off">
+          <button class="btn primary" id="btn-add">添加</button>
+        </div>
+        <div class="chip-row">
+          <button class="btn tiny" id="btn-smart" title="按菜名后缀自动分大类，例如「麻辣鸡丁滑蛋饭 / 五花肉滑蛋饭」→ 大类「滑蛋饭」">✨ 智能归类</button>
+          <button class="btn tiny" id="btn-all">全选</button>
+          <button class="btn tiny" id="btn-none">全不选</button>
+          <button class="btn tiny" id="btn-invert">反选</button>
+          <span class="spacer"></span>
+          <button class="btn tiny danger" id="btn-clear">清空</button>
+        </div>
+        <div class="cat-list" id="cat-list"></div>
+      </div>
+
+      <!-- ============ 拍照识别 ============ -->
+      <div class="pane" data-pane="photo">
+        <div class="photo-drop" id="photo-drop">
+          <div class="photo-drop-icon">📷</div>
+          <div class="photo-drop-title">拍一张食堂菜牌 / 餐盘照片</div>
+          <div class="photo-drop-sub">自动识别上面有什么菜，确认后加进转盘</div>
+          <div class="photo-btns">
+            <button class="btn primary" id="btn-camera">拍照</button>
+            <button class="btn ghost" id="btn-album">从相册选</button>
+          </div>
+        </div>
+        <input id="file-camera" type="file" accept="image/*" capture="environment" hidden>
+        <input id="file-album" type="file" accept="image/*" multiple hidden>
+
+        <div class="photo-preview" id="photo-preview" hidden></div>
+        <div class="status" id="photo-status" hidden></div>
+        <div class="recognized" id="recognized" hidden></div>
+      </div>
+
+      <!-- ============ 设置 ============ -->
+      <div class="pane" data-pane="settings">
+        <div class="field">
+          <label class="label" for="set-provider">视觉模型服务商</label>
+          <select class="input" id="set-provider"></select>
+          <div class="hint" id="provider-hint"></div>
+        </div>
+        <div class="field">
+          <label class="label" for="set-baseurl">接口地址（base URL）</label>
+          <input class="input" id="set-baseurl" type="text" spellcheck="false" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+        </div>
+        <div class="field">
+          <label class="label" for="set-model">模型名</label>
+          <input class="input" id="set-model" type="text" spellcheck="false" placeholder="qwen-vl-max">
+        </div>
+        <div class="field">
+          <label class="label" for="set-apikey">API Key</label>
+          <div class="row">
+            <input class="input" id="set-apikey" type="password" spellcheck="false" placeholder="sk-...">
+            <button class="btn ghost" id="btn-eye" title="显示/隐藏">👁</button>
+          </div>
+          <div class="hint">Key 只存在你这台设备的本地存储里，不会上传到任何别的地方。</div>
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="set-proxy"> <span>通过本地代理请求（推荐，用 <code>npm run serve</code> 打开时能彻底绕开浏览器跨域）</span></label>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btn-test">测试连接</button>
+          <button class="btn ghost" id="btn-save-vision">保存</button>
+        </div>
+
+        <hr class="sep">
+
+        <div class="field">
+          <label class="label">转盘</label>
+          <label class="check"><input type="checkbox" id="set-sound"> <span>转动时播放音效</span></label>
+          <label class="check"><input type="checkbox" id="set-remove"> <span>抽中后自动从转盘移除</span></label>
+          <label class="check"><input type="checkbox" id="set-confetti"> <span>抽中后撒花</span></label>
+          <div class="range-row">
+            <span>转动时长</span>
+            <input type="range" id="set-duration" min="2" max="10" step="0.5">
+            <span id="set-duration-val" class="mono">4.5s</span>
+          </div>
+        </div>
+
+        <hr class="sep">
+
+        <div class="field">
+          <label class="label">数据</label>
+          <div class="chip-row">
+            <button class="btn tiny" id="btn-export">导出备份</button>
+            <button class="btn tiny" id="btn-import">导入备份</button>
+            <button class="btn tiny" id="btn-copy">复制数据</button>
+            <button class="btn tiny danger" id="btn-reset">恢复出厂</button>
+          </div>
+          <div class="hint" id="stat-hint"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</div>
+
+<div class="modal-mask" id="modal-mask" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+</div>
+<div class="toast-wrap" id="toast-wrap"></div>
+<canvas id="confetti" class="confetti" hidden></canvas>
+<input id="file-import" type="file" accept=".json,application/json" hidden>
+
+<!-- INLINE:js -->
+</body>
+</html>

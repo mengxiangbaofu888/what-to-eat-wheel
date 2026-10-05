@@ -1,0 +1,34 @@
+# 依赖与缓存
+node_modules/
+.npm-cache/
+.npmrc.local
+
+# 安卓构建中间产物（android/ 工程本身是提交的，见 README）
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
+# 本地工具链（JDK / Android SDK，体积很大，不进仓库）
+.android-tools/
+
+# 复制进仓库的 Gradle 缓存和 debug 签名（npm run setup:android 生成）
+.gradle-home/
+.android-home/
+
+# 打包出来的 APK（走 GitHub Releases 分发，不进 git）
+release/
+
+# 截图时留下的浏览器临时 profile
+.chrome-profile*/
+.edge-profile*/
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db
+dist-preview/
