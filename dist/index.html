@@ -413,6 +413,18 @@ input[type='checkbox']:indeterminate::after {
 .cat-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255, 255, 255, 0.04); cursor: pointer; }
 :root[data-theme='light'] .cat-head { background: rgba(0, 0, 0, 0.03); }
 .cat-name { font-weight: 700; font-size: 13.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 「整体」标记：这个大类在转盘上只占一个扇区，下面的菜不单独出现 */
+.cat-tag {
+  flex: 0 0 auto;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  color: #073b2c;
+  background: linear-gradient(135deg, var(--ok), #7ceec4);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+:root[data-theme='light'] .cat-tag { color: #fff; background: linear-gradient(135deg, #0aa87c, #0d9e73); }
+
 .cat-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .chev { transition: transform 0.2s; color: var(--text-dim); font-size: 11px; }
 .cat-group.collapsed .chev { transform: rotate(-90deg); }
@@ -422,6 +434,9 @@ input[type='checkbox']:indeterminate::after {
 .cat-item:hover { background: rgba(255, 255, 255, 0.03); }
 .item-name { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .cat-item.off .item-name { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--line); }
+/* 整体上盘时，下面这些菜不参与转盘，视觉上压暗表示「只是清单」 */
+.cat-item.grouped .item-name { color: var(--text-dim); cursor: default; }
+.cat-item.grouped input[type='checkbox'] { opacity: 0.4; }
 
 /*
  * 点按区域必须够大。
@@ -1128,7 +1143,21 @@ input[type='checkbox']:indeterminate::after {
   }
 
   function normalizeCategory(c) {
-    return { id: c.id || U.uid('cat'), name: String(c.name || '').trim(), collapsed: !!c.collapsed };
+    return {
+      id: c.id || U.uid('cat'),
+      name: String(c.name || '').trim(),
+      collapsed: !!c.collapsed,
+      /*
+       * 大类怎么上转盘：
+       *   false（默认）—— 展开，下面勾中的每道菜各占一个扇区
+       *   true        —— 整个大类只占一个扇区，扇区上写大类名，下面的菜不再单独出现
+       * 适用场景：食堂那种「滑蛋饭」底下有七八种口味，全铺开扇区就挤爆了；
+       * 而且实际去吃的时候本来就是先定吃哪一类，到了窗口再挑。
+       */
+      groupAsOne: !!c.groupAsOne,
+      // 只在 groupAsOne 为 true 时有意义：这一个「整体」要不要上盘
+      enabled: c.enabled !== false,
+    };
   }
 
   var api = {
@@ -1209,8 +1238,15 @@ input[type='checkbox']:indeterminate::after {
     mergeCategory: function (fromId, intoId) {
       if (fromId === intoId) return;
       var cat = api.findCategory(fromId);
+      var into = api.findCategory(intoId);
       if (!cat) return;
       data.items.forEach(function (i) { if (i.categoryId === fromId) i.categoryId = intoId; });
+      // 被并进来的那个如果设了「整体上盘」，目标大类就跟着用整体模式，
+      // 否则用户设过的模式会在合并时无声无息地丢掉
+      if (into && cat.groupAsOne) {
+        into.groupAsOne = true;
+        into.enabled = cat.enabled !== false;
+      }
       data.categories = data.categories.filter(function (c) { return c.id !== fromId; });
       save(); emit();
     },
@@ -1313,18 +1349,35 @@ input[type='checkbox']:indeterminate::after {
 
     setAllEnabled: function (on) {
       data.items.forEach(function (i) { i.enabled = !!on; });
+      // 整体上盘的大类也算「转盘上的一项」，全选/全不选当然要带上它们
+      data.categories.forEach(function (c) { if (c.groupAsOne) c.enabled = !!on; });
       save(); emit();
     },
 
     invertEnabled: function () {
       data.items.forEach(function (i) { i.enabled = !i.enabled; });
+      data.categories.forEach(function (c) { if (c.groupAsOne) c.enabled = !(c.enabled !== false); });
       save(); emit();
     },
 
     /** 只留下这一个在转盘上 */
     soloItem: function (id) {
       data.items.forEach(function (i) { i.enabled = i.id === id; });
+      // 整体上盘的大类每个都占一个扇区，会破坏「只留这一道」，先全部撤下
+      data.categories.forEach(function (c) { c.enabled = false; });
+      // 目标菜如果正好属于一个整体上盘的大类，会被那个大类吃掉，转盘就空了。
+      // 用户点「只转这一道」本身就是在表达「我要按菜品细分」，所以把这个大类切回展开模式。
+      var it = api.findItem(id);
+      var soloCat = null;
+      if (it && it.categoryId) {
+        var cat = api.findCategory(it.categoryId);
+        if (cat && cat.groupAsOne) {
+          cat.groupAsOne = false;
+          soloCat = cat;
+        }
+      }
       save(); emit();
+      return soloCat;
     },
 
     clearItems: function () {
@@ -1343,17 +1396,73 @@ input[type='checkbox']:indeterminate::after {
       return data.items.filter(function (i) { return i.enabled; });
     },
 
+    /**
+     * 转盘上真正会出现的选项。
+     *
+     * 两种情况：
+     *   · 大类设了「整体上盘」→ 只出 1 个选项，名字是大类名；这个大类的菜不论勾没勾都不再单独出扇区
+     *   · 其余情况           → 每道勾中的菜各出 1 个选项（原来的行为）
+     *
+     * 返回的每一项都带 kind，因为转到「大类」和转到「某道菜」结果卡片要写得不一样：
+     * 转到大类只说明「吃这一类」，具体哪道窗口前再挑。
+     */
+    wheelOptions: function () {
+      var out = [];
+      var grouped = {};
+      data.categories.forEach(function (c) {
+        if (!c.groupAsOne) return;
+        grouped[c.id] = true;
+        if (c.enabled === false) return;
+        out.push({
+          key: 'cat:' + c.id,
+          kind: 'category',
+          id: c.id,
+          name: c.name,
+          categoryId: c.id,
+          count: api.itemsOf(c.id).length,
+        });
+      });
+      data.items.forEach(function (i) {
+        if (!i.enabled) return;
+        if (i.categoryId && grouped[i.categoryId]) return;   // 归到整体里了，不单独出
+        out.push({ key: 'it:' + i.id, kind: 'item', id: i.id, name: i.name, categoryId: i.categoryId || null });
+      });
+      return out;
+    },
+
+    /** 切换某个大类「整体上盘 / 展开成菜品」 */
+    setCategoryMode: function (catId, groupAsOne) {
+      var cat = api.findCategory(catId);
+      if (!cat) return;
+      cat.groupAsOne = !!groupAsOne;
+      save(); emit();
+    },
+
+    /** 整体模式下，这个大类要不要上盘 */
+    setCategoryEnabled: function (catId, on) {
+      var cat = api.findCategory(catId);
+      if (!cat) return;
+      cat.enabled = !!on;
+      save(); emit();
+    },
+
     groups: function () {
       var list = data.categories.map(function (c) {
-        return { id: c.id, name: c.name, collapsed: !!c.collapsed, items: api.itemsOf(c.id) };
+        return {
+          id: c.id, name: c.name, collapsed: !!c.collapsed, items: api.itemsOf(c.id),
+          groupAsOne: !!c.groupAsOne, enabled: c.enabled !== false,
+        };
       });
-      list.push({ id: null, name: '未分类', collapsed: !!data.uncategorizedCollapsed, items: api.itemsOf(null), virtual: true });
+      list.push({ id: null, name: '未分类', collapsed: !!data.uncategorizedCollapsed, items: api.itemsOf(null), virtual: true, groupAsOne: false });
       return list;
     },
 
     stats: function () {
-      var on = api.enabledItems().length;
-      return { items: data.items.length, enabled: on, categories: data.categories.length };
+      return {
+        items: data.items.length,
+        enabled: api.wheelOptions().length,   // 「转盘上 N 道」：整体上盘时 1 个大类算 1 个
+        categories: data.categories.length,
+      };
     },
 
     /* ------------------------------ 历史 ------------------------------ */
@@ -2530,12 +2639,14 @@ input[type='checkbox']:indeterminate::after {
       var onCount = g.items.filter(function (i) { return i.enabled; }).length;
       var allOn = g.items.length > 0 && onCount === g.items.length;
       var someOn = onCount > 0 && !allOn;
+      var asOne = !!g.groupAsOne;   // 整个大类只上一个扇区
 
-      var headBox = el('input', { type: 'checkbox', checked: allOn });
-      headBox.indeterminate = someOn;
+      var headBox = el('input', { type: 'checkbox', checked: asOne ? g.enabled !== false : allOn });
+      headBox.indeterminate = asOne ? false : someOn;
       headBox.addEventListener('click', function (e) {
         e.stopPropagation();
-        S.setManyEnabled(g.items.map(function (i) { return i.id; }), !allOn);
+        if (asOne) S.setCategoryEnabled(g.id, g.enabled === false);   // 整体模式：只管这一类上不上
+        else S.setManyEnabled(g.items.map(function (i) { return i.id; }), !allOn);
       });
 
       var head = el('div', { class: 'cat-head', onclick: function (e) {
@@ -2544,7 +2655,8 @@ input[type='checkbox']:indeterminate::after {
       } }, [
         headBox,
         el('span', { class: 'cat-name', text: g.name }),
-        el('span', { class: 'cat-count', text: onCount + '/' + g.items.length }),
+        asOne ? el('span', { class: 'cat-tag', text: '整体', title: '整个大类在转盘上只占一个扇区，下面的菜不单独出现' }) : null,
+        el('span', { class: 'cat-count', text: asOne ? g.items.length + ' 道' : onCount + '/' + g.items.length }),
       ]);
 
       if (!g.virtual) {
@@ -2559,11 +2671,24 @@ input[type='checkbox']:indeterminate::after {
 
       var itemsBox = el('div', { class: 'cat-items' });
       g.items.forEach(function (it) {
-        var cb = el('input', { type: 'checkbox', checked: it.enabled });
-        cb.addEventListener('change', function () { S.setEnabled(it.id, cb.checked); });
-        var row = el('div', { class: 'cat-item' + (it.enabled ? '' : ' off') }, [
+        var cb = el('input', { type: 'checkbox', checked: asOne ? true : it.enabled });
+        if (asOne) {
+          // 整体上盘时，这一道不会单独出现在转盘上，复选框没有意义，禁用掉免得误导
+          cb.disabled = true;
+          cb.title = '「' + g.name + '」是整体上盘，下面的菜不单独出现';
+        } else {
+          cb.addEventListener('change', function () { S.setEnabled(it.id, cb.checked); });
+        }
+        var row = el('div', {
+          class: 'cat-item' + (asOne ? ' grouped' : (it.enabled ? '' : ' off')),
+        }, [
           cb,
-          el('span', { class: 'item-name', text: it.name, title: it.name, onclick: function () { S.setEnabled(it.id, !it.enabled); } }),
+          el('span', {
+            class: 'item-name',
+            text: it.name,
+            title: asOne ? it.name + '（属于整体上盘的「' + g.name + '」）' : it.name,
+            onclick: function () { if (!asOne) S.setEnabled(it.id, !it.enabled); },
+          }),
           el('button', { class: 'mini', title: '这道菜的操作', text: '⋯', onclick: function () { itemMenu(it.id); } }),
         ]);
         itemsBox.appendChild(row);
@@ -2574,7 +2699,7 @@ input[type='checkbox']:indeterminate::after {
     });
   }
 
-  /** 点大类右边的「⋯」：重命名 / 在这个大类下加菜 / 删除 */
+  /** 点大类右边的「⋯」：整体上盘 / 重命名 / 加菜 / 删除 */
   function categoryMenu(id) {
     var cat = S.findCategory(id);
     if (!cat) return;
@@ -2582,13 +2707,22 @@ input[type='checkbox']:indeterminate::after {
     UI.sheet({
       title: cat.name + '（' + count + ' 道菜）',
       items: [
+        cat.groupAsOne
+          ? { icon: '📋', text: '改成「按菜品」上转盘', hint: '每道菜单独一个扇区', value: 'mode-items' }
+          : { icon: '🎯', text: '改成「整个大类」上转盘', hint: '只占一个扇区', value: 'mode-one' },
         { icon: '✏️', text: '重命名这个大类', value: 'rename' },
         { icon: '➕', text: '往这个大类里加菜', hint: '一行一个', value: 'add' },
         { icon: '🎯', text: '只转这个大类里的菜', value: 'solo' },
         { icon: '🗑', text: '删除这个大类', danger: true, hint: count ? count + ' 道菜' : '', value: 'delete' },
       ],
     }).then(function (v) {
-      if (v === 'rename') editCategory(id);
+      if (v === 'mode-one') {
+        S.setCategoryMode(id, true);
+        UI.toast('「' + cat.name + '」改成整体上盘：转盘上只占一个扇区', 'ok', 3000);
+      } else if (v === 'mode-items') {
+        S.setCategoryMode(id, false);
+        UI.toast('「' + cat.name + '」改回按菜品上盘', 'ok');
+      } else if (v === 'rename') editCategory(id);
       else if (v === 'add') addToCategory(id);
       else if (v === 'solo') {
         S.setAllEnabled(false);
@@ -2659,10 +2793,15 @@ input[type='checkbox']:indeterminate::after {
   }
 
   function solo(id) {
-    S.soloItem(id);
+    var switchedCat = S.soloItem(id);
     var it = S.findItem(id);
     switchTab('food');
-    UI.toast('转盘上只留「' + (it ? it.name : '') + '」，转吧！');
+    if (switchedCat) {
+      // 这道菜原本属于一个「整体上盘」的大类，会被那个大类吃掉，所以顺手切回按菜品
+      UI.toast('「' + switchedCat.name + '」已切回按菜品上盘，现在只转「' + (it ? it.name : '') + '」', 'ok', 3600);
+    } else {
+      UI.toast('转盘上只留「' + (it ? it.name : '') + '」，转吧！');
+    }
     setTimeout(spin, 260);
   }
 
@@ -2885,21 +3024,21 @@ input[type='checkbox']:indeterminate::after {
   }
 
   function syncWheel() {
-    var items = S.enabledItems();
-    wheel.setItems(items);
-    els.spinSub.textContent = items.length + ' 个';
-    els.btnSpin.disabled = items.length === 0 || wheel.spinning;
+    var opts = S.wheelOptions();
+    wheel.setItems(opts);
+    els.spinSub.textContent = opts.length + ' 个';
+    els.btnSpin.disabled = opts.length === 0 || wheel.spinning;
   }
 
   function spin() {
-    var items = S.enabledItems();
-    if (!items.length) {
-      UI.toast('转盘上还没有菜，先去「菜品」里加几个', 'err');
+    var opts = S.wheelOptions();
+    if (!opts.length) {
+      UI.toast('转盘上还没有东西，先去「菜品」里勾几个', 'err');
       switchTab('food');
       return;
     }
     if (wheel.spinning) return;
-    wheel.setItems(items);
+    wheel.setItems(opts);
     els.resultCard.hidden = true;
     els.decidedCard.hidden = true;
     els.resultEmpty.hidden = false;
@@ -2916,16 +3055,29 @@ input[type='checkbox']:indeterminate::after {
       S.addHistory(res.item.name);
       if (S.settings.confetti) UI.confetti();
       if (S.settings.removeAfterPick) {
-        setTimeout(function () { S.setEnabled(res.item.id, false); }, 1400);
+        setTimeout(function () {
+          // 转到大类就把这一类整个撤下，转到某道菜就撤那道菜
+          if (res.item.kind === 'category') S.setCategoryEnabled(res.item.id, false);
+          else S.setEnabled(res.item.id, false);
+        }, 1400);
       }
     });
   }
 
-  function showResult(item) {
-    lastPicked = item;
-    var cat = item.categoryId ? S.findCategory(item.categoryId) : null;
-    els.resultName.textContent = item.name;
-    els.resultCat.textContent = cat ? '大类：' + cat.name : '';
+  /** 转盘上的一项：可能是某道菜，也可能是一个「整体上盘」的大类 */
+  function showResult(picked) {
+    lastPicked = picked;
+    els.resultName.textContent = picked.name;
+
+    if (picked.kind === 'category') {
+      // 转到大类：只知道吃哪一类，具体哪道到窗口再挑
+      var n = S.itemsOf(picked.id).length;
+      els.resultCat.textContent = n ? '这一类里有 ' + n + ' 道，到了窗口再挑一道' : '就是这一类的菜';
+    } else {
+      var cat = picked.categoryId ? S.findCategory(picked.categoryId) : null;
+      els.resultCat.textContent = cat ? '大类：' + cat.name : '';
+    }
+
     els.decidedCard.hidden = true;
     els.resultEmpty.hidden = true;
     els.resultCard.hidden = false;
@@ -3243,6 +3395,9 @@ input[type='checkbox']:indeterminate::after {
         '<li><b>加菜</b>：在「🍽 菜品」里打字回车就能加；一行一个可以一次加一串。</li>',
         '<li><b>大类 / 小项</b>：像「麻辣鸡丁滑蛋饭」「五花肉滑蛋饭」会自动归到「滑蛋饭」这个大类。' +
           '勾大类 = 把这个大类下的都放上转盘；只勾某一道 = 只转那一道。</li>',
+        '<li><b>整个大类当一个选项</b>：菜太多、扇区挤不下的时候，点大类右边的 <b>⋯</b> →' +
+          '「改成整个大类上转盘」。这样这一类在转盘上只占一个扇区、写大类名，' +
+          '转到它就先定了吃哪一类，具体哪道到了窗口再挑。想改回来同样在 <b>⋯</b> 里。</li>',
         '<li><b>自己建大类</b>：点「＋ 新建大类」就能建一个自己的分类；' +
           '想改名或删除，点大类右边那个 <b>⋯</b>；想给某道菜换大类，点这道菜右边的 <b>⋯</b>。</li>',
         '<li><b>智能归类</b>：如果菜名没归好，点一下「✨ 智能归类」，它会按菜名后缀重新分大类。</li>',
@@ -3340,7 +3495,9 @@ input[type='checkbox']:indeterminate::after {
     });
     els.btnDrop.addEventListener('click', function () {
       if (!lastPicked) return;
-      S.setEnabled(lastPicked.id, false);
+      // 转到大类就把这一类整个撤下，转到某道菜就撤那道菜
+      if (lastPicked.kind === 'category') S.setCategoryEnabled(lastPicked.id, false);
+      else S.setEnabled(lastPicked.id, false);
       UI.toast('「' + lastPicked.name + '」已从转盘移除');
       els.resultCard.hidden = true;
       els.resultEmpty.hidden = false;

@@ -385,6 +385,80 @@ if (S.categoryByName('滑蛋饭')) bad('删除大类', '大类还在');
 else if (orphan.some((i) => i.categoryId)) bad('只解散大类时菜品保留', '菜品还挂在不存在的类上');
 else ok('删除大类', '大类解散，' + orphan.length + ' 道菜回到未分类');
 
+/* ---------------- 整体上盘：整个大类只占一个扇区 ---------------- */
+
+const oneCat = S.addCategory('整体测试类', true);
+const oneA = S.addItem('整体测试菜甲', oneCat.id, true);
+const oneB = S.addItem('整体测试菜乙', oneCat.id, true);
+S.setAllEnabled(false);
+S.save(true); S.emit();
+await wait(30);
+
+if (S.wheelOptions().length !== 0) bad('全部撤下后转盘为空', `还剩 ${S.wheelOptions().length} 项`);
+else ok('全部撤下后转盘为空');
+
+// 切成「整体上盘」并勾上这一类
+S.setCategoryMode(oneCat.id, true);
+S.setCategoryEnabled(oneCat.id, true);
+await wait(30);
+
+let opts = S.wheelOptions();
+if (opts.length !== 1) bad('整体上盘：只占一个扇区', `期望 1 项，实际 ${opts.length} 项：${opts.map((o) => o.name).join('、')}`);
+else if (opts[0].kind !== 'category' || opts[0].name !== '整体测试类') bad('整体上盘：扇区名是大类名', JSON.stringify(opts[0]));
+else ok('整体上盘：只占一个扇区', opts[0].name + '（kind=' + opts[0].kind + '）');
+
+// 关键：这个时候就算把下面的菜都勾上，它们也不该单独出扇区
+S.setManyEnabled([oneA.id, oneB.id], true);
+await wait(30);
+opts = S.wheelOptions();
+if (opts.length !== 1) bad('整体上盘时不展开菜品', `期望仍然只有 1 项，实际 ${opts.length} 项：${opts.map((o) => o.name).join('、')}`);
+else ok('整体上盘时不展开菜品', '两道菜勾上了也不占扇区');
+
+// 界面上应该出现「整体」标记，菜品行变成不可勾选
+if (!$('#cat-list .cat-tag')) bad('界面上有「整体」标记', '找不到 .cat-tag');
+else ok('界面上有「整体」标记', $('.cat-tag').textContent);
+
+const groupedRows = $$('#cat-list .cat-item.grouped');
+if (groupedRows.length !== 2) bad('整体模式下的菜品行有标记', `期望 2 行，实际 ${groupedRows.length}`);
+else if (!groupedRows[0].querySelector('input').disabled) bad('整体模式下的菜品复选框该禁用', '还能点');
+else ok('整体模式下的菜品复选框被禁用');
+
+// 撤销这一类
+S.setCategoryEnabled(oneCat.id, false);
+await wait(30);
+if (S.wheelOptions().length !== 0) bad('整体模式也能撤下这一类', `还剩 ${S.wheelOptions().length} 项`);
+else ok('整体模式也能撤下这一类');
+
+// 切回「按菜品」，勾中的两道菜应该重新各自占一个扇区
+S.setCategoryMode(oneCat.id, false);
+await wait(30);
+opts = S.wheelOptions();
+if (opts.length !== 2 || opts.some((o) => o.kind !== 'item')) {
+  bad('切回按菜品后恢复展开', `${opts.length} 项：${opts.map((o) => o.name + '/' + o.kind).join('、')}`);
+} else {
+  ok('切回按菜品后恢复展开', opts.map((o) => o.name).join('、'));
+}
+
+// 「只转这一道」碰上一个整体上盘的大类时，应该把那个大类切回展开，否则这道菜会被吃掉
+S.setCategoryMode(oneCat.id, true);
+S.setCategoryEnabled(oneCat.id, true);
+await wait(30);
+const switched = S.soloItem(oneA.id);
+await wait(30);
+opts = S.wheelOptions();
+if (switched !== null && switched !== undefined) {
+  if (opts.length !== 1 || opts[0].name !== '整体测试菜甲') bad('只转这一道（原本是整体上盘）', `转盘上是 ${opts.map((o) => o.name).join('、') || '空的'}`);
+  else ok('只转这一道（原本是整体上盘）', '已切回按菜品，转盘上只剩这一道');
+} else {
+  bad('只转这一道（原本是整体上盘）', '应该返回被切回展开的大类，实际没有');
+}
+
+// 收拾干净，别影响后面的检查
+S.removeCategory(oneCat.id, 'delete');
+S.setAllEnabled(true);
+S.save(true); S.emit();
+await wait(30);
+
 /* ---------------- 安卓原生壳的安全区（顶栏被状态栏挡住的那个问题） ---------------- */
 
 if (!/html\.is-native\s*\{[^}]*--safe-t:\s*max\(env\(safe-area-inset-top/.test(cssText)) {

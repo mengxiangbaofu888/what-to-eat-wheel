@@ -403,6 +403,18 @@ input[type='checkbox']:indeterminate::after {
 .cat-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255, 255, 255, 0.04); cursor: pointer; }
 :root[data-theme='light'] .cat-head { background: rgba(0, 0, 0, 0.03); }
 .cat-name { font-weight: 700; font-size: 13.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 「整体」标记：这个大类在转盘上只占一个扇区，下面的菜不单独出现 */
+.cat-tag {
+  flex: 0 0 auto;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  color: #073b2c;
+  background: linear-gradient(135deg, var(--ok), #7ceec4);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+:root[data-theme='light'] .cat-tag { color: #fff; background: linear-gradient(135deg, #0aa87c, #0d9e73); }
+
 .cat-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .chev { transition: transform 0.2s; color: var(--text-dim); font-size: 11px; }
 .cat-group.collapsed .chev { transform: rotate(-90deg); }
@@ -412,6 +424,9 @@ input[type='checkbox']:indeterminate::after {
 .cat-item:hover { background: rgba(255, 255, 255, 0.03); }
 .item-name { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .cat-item.off .item-name { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--line); }
+/* 整体上盘时，下面这些菜不参与转盘，视觉上压暗表示「只是清单」 */
+.cat-item.grouped .item-name { color: var(--text-dim); cursor: default; }
+.cat-item.grouped input[type='checkbox'] { opacity: 0.4; }
 
 /*
  * 点按区域必须够大。

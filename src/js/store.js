@@ -153,7 +153,21 @@
   }
 
   function normalizeCategory(c) {
-    return { id: c.id || U.uid('cat'), name: String(c.name || '').trim(), collapsed: !!c.collapsed };
+    return {
+      id: c.id || U.uid('cat'),
+      name: String(c.name || '').trim(),
+      collapsed: !!c.collapsed,
+      /*
+       * 大类怎么上转盘：
+       *   false（默认）—— 展开，下面勾中的每道菜各占一个扇区
+       *   true        —— 整个大类只占一个扇区，扇区上写大类名，下面的菜不再单独出现
+       * 适用场景：食堂那种「滑蛋饭」底下有七八种口味，全铺开扇区就挤爆了；
+       * 而且实际去吃的时候本来就是先定吃哪一类，到了窗口再挑。
+       */
+      groupAsOne: !!c.groupAsOne,
+      // 只在 groupAsOne 为 true 时有意义：这一个「整体」要不要上盘
+      enabled: c.enabled !== false,
+    };
   }
 
   var api = {
@@ -234,8 +248,15 @@
     mergeCategory: function (fromId, intoId) {
       if (fromId === intoId) return;
       var cat = api.findCategory(fromId);
+      var into = api.findCategory(intoId);
       if (!cat) return;
       data.items.forEach(function (i) { if (i.categoryId === fromId) i.categoryId = intoId; });
+      // 被并进来的那个如果设了「整体上盘」，目标大类就跟着用整体模式，
+      // 否则用户设过的模式会在合并时无声无息地丢掉
+      if (into && cat.groupAsOne) {
+        into.groupAsOne = true;
+        into.enabled = cat.enabled !== false;
+      }
       data.categories = data.categories.filter(function (c) { return c.id !== fromId; });
       save(); emit();
     },
@@ -338,18 +359,35 @@
 
     setAllEnabled: function (on) {
       data.items.forEach(function (i) { i.enabled = !!on; });
+      // 整体上盘的大类也算「转盘上的一项」，全选/全不选当然要带上它们
+      data.categories.forEach(function (c) { if (c.groupAsOne) c.enabled = !!on; });
       save(); emit();
     },
 
     invertEnabled: function () {
       data.items.forEach(function (i) { i.enabled = !i.enabled; });
+      data.categories.forEach(function (c) { if (c.groupAsOne) c.enabled = !(c.enabled !== false); });
       save(); emit();
     },
 
     /** 只留下这一个在转盘上 */
     soloItem: function (id) {
       data.items.forEach(function (i) { i.enabled = i.id === id; });
+      // 整体上盘的大类每个都占一个扇区，会破坏「只留这一道」，先全部撤下
+      data.categories.forEach(function (c) { c.enabled = false; });
+      // 目标菜如果正好属于一个整体上盘的大类，会被那个大类吃掉，转盘就空了。
+      // 用户点「只转这一道」本身就是在表达「我要按菜品细分」，所以把这个大类切回展开模式。
+      var it = api.findItem(id);
+      var soloCat = null;
+      if (it && it.categoryId) {
+        var cat = api.findCategory(it.categoryId);
+        if (cat && cat.groupAsOne) {
+          cat.groupAsOne = false;
+          soloCat = cat;
+        }
+      }
       save(); emit();
+      return soloCat;
     },
 
     clearItems: function () {
@@ -368,17 +406,73 @@
       return data.items.filter(function (i) { return i.enabled; });
     },
 
+    /**
+     * 转盘上真正会出现的选项。
+     *
+     * 两种情况：
+     *   · 大类设了「整体上盘」→ 只出 1 个选项，名字是大类名；这个大类的菜不论勾没勾都不再单独出扇区
+     *   · 其余情况           → 每道勾中的菜各出 1 个选项（原来的行为）
+     *
+     * 返回的每一项都带 kind，因为转到「大类」和转到「某道菜」结果卡片要写得不一样：
+     * 转到大类只说明「吃这一类」，具体哪道窗口前再挑。
+     */
+    wheelOptions: function () {
+      var out = [];
+      var grouped = {};
+      data.categories.forEach(function (c) {
+        if (!c.groupAsOne) return;
+        grouped[c.id] = true;
+        if (c.enabled === false) return;
+        out.push({
+          key: 'cat:' + c.id,
+          kind: 'category',
+          id: c.id,
+          name: c.name,
+          categoryId: c.id,
+          count: api.itemsOf(c.id).length,
+        });
+      });
+      data.items.forEach(function (i) {
+        if (!i.enabled) return;
+        if (i.categoryId && grouped[i.categoryId]) return;   // 归到整体里了，不单独出
+        out.push({ key: 'it:' + i.id, kind: 'item', id: i.id, name: i.name, categoryId: i.categoryId || null });
+      });
+      return out;
+    },
+
+    /** 切换某个大类「整体上盘 / 展开成菜品」 */
+    setCategoryMode: function (catId, groupAsOne) {
+      var cat = api.findCategory(catId);
+      if (!cat) return;
+      cat.groupAsOne = !!groupAsOne;
+      save(); emit();
+    },
+
+    /** 整体模式下，这个大类要不要上盘 */
+    setCategoryEnabled: function (catId, on) {
+      var cat = api.findCategory(catId);
+      if (!cat) return;
+      cat.enabled = !!on;
+      save(); emit();
+    },
+
     groups: function () {
       var list = data.categories.map(function (c) {
-        return { id: c.id, name: c.name, collapsed: !!c.collapsed, items: api.itemsOf(c.id) };
+        return {
+          id: c.id, name: c.name, collapsed: !!c.collapsed, items: api.itemsOf(c.id),
+          groupAsOne: !!c.groupAsOne, enabled: c.enabled !== false,
+        };
       });
-      list.push({ id: null, name: '未分类', collapsed: !!data.uncategorizedCollapsed, items: api.itemsOf(null), virtual: true });
+      list.push({ id: null, name: '未分类', collapsed: !!data.uncategorizedCollapsed, items: api.itemsOf(null), virtual: true, groupAsOne: false });
       return list;
     },
 
     stats: function () {
-      var on = api.enabledItems().length;
-      return { items: data.items.length, enabled: on, categories: data.categories.length };
+      return {
+        items: data.items.length,
+        enabled: api.wheelOptions().length,   // 「转盘上 N 道」：整体上盘时 1 个大类算 1 个
+        categories: data.categories.length,
+      };
     },
 
     /* ------------------------------ 历史 ------------------------------ */
