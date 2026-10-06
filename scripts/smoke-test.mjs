@@ -31,40 +31,43 @@ virtualConsole.on('error', (msg) => {
 });
 virtualConsole.on('warn', (msg) => console.log('  · warn: ' + msg));
 
+/** 给 jsdom 补上浏览器里才有的东西：假 canvas、假的元素尺寸 */
+function stubBrowser(window, opts = {}) {
+  // 标记「已经看过帮助」，免得启动 500ms 后的自动弹窗在测试中途冒出来打乱节奏
+  try { window.localStorage.setItem('wtw-seen-help', '1'); } catch { /* ignore */ }
+  if (opts.native) window.Capacitor = { isNativePlatform: () => true };
+
+  const noop = () => {};
+  const fakeCtx = {
+    canvas: null,
+    setTransform: noop, clearRect: noop, save: noop, restore: noop,
+    beginPath: noop, closePath: noop, moveTo: noop, lineTo: noop, arc: noop,
+    fill: noop, stroke: noop, fillRect: noop, strokeRect: noop,
+    translate: noop, rotate: noop, scale: noop,
+    createLinearGradient: () => ({ addColorStop: noop }),
+    measureText: (t) => ({ width: String(t).length * 8 }),
+    fillText: noop, strokeText: noop, setLineDash: noop, drawImage: noop,
+    fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textAlign: '', textBaseline: '', globalAlpha: 1,
+  };
+  window.HTMLCanvasElement.prototype.getContext = function () {
+    const ctx = Object.create(fakeCtx);
+    ctx.canvas = this;
+    return ctx;
+  };
+  // jsdom 的布局都是 0，给个固定尺寸，让转盘按真实大小算
+  window.Element.prototype.getBoundingClientRect = function () {
+    return { width: 360, height: 360, top: 0, left: 0, right: 360, bottom: 360, x: 0, y: 0 };
+  };
+  Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', { get: () => 360, configurable: true });
+  Object.defineProperty(window.HTMLElement.prototype, 'offsetHeight', { get: () => 360, configurable: true });
+}
+
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   pretendToBeVisual: true,
   url: 'https://localhost/',
   virtualConsole,
-  beforeParse(window) {
-    // 标记「已经看过帮助」，免得启动 500ms 后的自动弹窗在测试中途冒出来打乱节奏
-    try { window.localStorage.setItem('wtw-seen-help', '1'); } catch { /* ignore */ }
-
-    // ---- 假 canvas ----
-    const noop = () => {};
-    const fakeCtx = {
-      canvas: null,
-      setTransform: noop, clearRect: noop, save: noop, restore: noop,
-      beginPath: noop, closePath: noop, moveTo: noop, lineTo: noop, arc: noop,
-      fill: noop, stroke: noop, fillRect: noop, strokeRect: noop,
-      translate: noop, rotate: noop, scale: noop,
-      createLinearGradient: () => ({ addColorStop: noop }),
-      measureText: (t) => ({ width: String(t).length * 8 }),
-      fillText: noop, strokeText: noop, setLineDash: noop, drawImage: noop,
-      fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textAlign: '', textBaseline: '', globalAlpha: 1,
-    };
-    window.HTMLCanvasElement.prototype.getContext = function () {
-      const ctx = Object.create(fakeCtx);
-      ctx.canvas = this;
-      return ctx;
-    };
-    // jsdom 的布局都是 0，给个固定尺寸，让转盘按真实大小算
-    window.Element.prototype.getBoundingClientRect = function () {
-      return { width: 360, height: 360, top: 0, left: 0, right: 360, bottom: 360, x: 0, y: 0 };
-    };
-    Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', { get: () => 360, configurable: true });
-    Object.defineProperty(window.HTMLElement.prototype, 'offsetHeight', { get: () => 360, configurable: true });
-  },
+  beforeParse(window) { stubBrowser(window); },
 });
 
 const { window } = dom;
@@ -217,6 +220,90 @@ else {
 if (!S.data.history.length) bad('历史记录', '没记录');
 else ok('历史记录', S.data.history.slice(0, 3).join('、'));
 
+/* ---------------- 「就吃这个」把结果定下来 ---------------- */
+
+click($('#btn-done'));
+await wait(120);
+if ($('#decided-card').hidden) bad('点「就吃这个」应该出现已定卡片', '卡片还是隐藏的');
+else ok('点「就吃这个」应该出现已定卡片', $('#decided-name').textContent);
+if (!S.todayDecided()) bad('决定要记下来（当天有效）', 'todayDecided() 是空的');
+else ok('决定要记下来（当天有效）', S.todayDecided().day);
+
+click($('#btn-undecide'));
+await wait(80);
+if (!$('#decided-card').hidden) bad('点「换一个」应该取消已定状态', '卡片还在');
+else ok('点「换一个」应该取消已定状态');
+
+/* ---------------- 自己建大类 / 改名 / 菜单 ---------------- */
+
+function buttonByText(root, text) {
+  return Array.from(root.querySelectorAll('button')).find((b) => (b.textContent || '').trim().includes(text));
+}
+
+click($('#btn-newcat'));
+await wait(80);
+let modal = $('#modal');
+if (!modal.querySelector('input')) bad('新建大类：应该弹出输入框', '没找到 input');
+else {
+  modal.querySelector('input').value = '我的自定义大类';
+  click(buttonByText(modal, '创建'));
+  await wait(400);   // 创建完会顺带问一句要不要往里加菜
+  const skip = buttonByText($('#modal'), '先不加');
+  if (skip) click(skip);
+  await wait(80);
+  if (!S.categoryByName('我的自定义大类')) bad('新建大类：建出来了', '数据里找不到');
+  else ok('新建大类', '「我的自定义大类」');
+
+  // 往这个大类里加菜
+  const cat = S.categoryByName('我的自定义大类');
+  click(groupMenuFor(cat.name));
+  await wait(80);
+  const addItem = buttonByText($('#modal'), '往这个大类里加菜');
+  if (!addItem) bad('大类菜单：应该有「往这个大类里加菜」', '没找到菜单项');
+  else {
+    click(addItem);
+    await wait(80);
+    const ta = $('#modal').querySelector('textarea');
+    if (!ta) bad('往大类里加菜：应该有输入框', '没找到 textarea');
+    else {
+      ta.value = '测试菜甲\n测试菜乙';
+      click(buttonByText($('#modal'), '加进去'));
+      await wait(120);
+      const inCat = S.itemsOf(cat.id).map((i) => i.name);
+      if (inCat.length !== 2) bad('往大类里加菜', `期望 2 道，实际 ${inCat.length}`);
+      else ok('往大类里加菜', inCat.join('、'));
+    }
+  }
+
+  // 点大类右边的 ⋯ → 重命名
+  click(groupMenuFor(cat.name));
+  await wait(80);
+  const renameItem = buttonByText($('#modal'), '重命名这个大类');
+  if (!renameItem) bad('大类菜单：应该有「重命名这个大类」', '没找到菜单项');
+  else {
+    click(renameItem);
+    await wait(80);
+    const input = $('#modal').querySelector('input');
+    input.value = '改名后的大类';
+    click(buttonByText($('#modal'), '保存'));
+    await wait(120);
+    if (!S.categoryByName('改名后的大类')) bad('大类改名', '改完找不到新名字');
+    else ok('大类改名', '我的自定义大类 → 改名后的大类');
+  }
+}
+
+/** 找到某个大类那一组的 ⋯ 按钮 */
+function groupMenuFor(catName) {
+  const groups = $$('#cat-list .cat-group');
+  for (const grp of groups) {
+    const nameEl = grp.querySelector('.cat-name');
+    if (nameEl && nameEl.textContent.trim() === catName) {
+      return grp.querySelector('.cat-head button.mini');
+    }
+  }
+  return null;
+}
+
 /* ---------------- 设置 / 持久化 ---------------- */
 
 S.setVision({ apiKey: 'sk-test-123', baseUrl: 'https://example.com/v1', model: 'test-vl' });
@@ -248,6 +335,28 @@ const orphan = S.data.items.filter((i) => i.name.indexOf('滑蛋饭') >= 0);
 if (S.categoryByName('滑蛋饭')) bad('删除大类', '大类还在');
 else if (orphan.some((i) => i.categoryId)) bad('只解散大类时菜品保留', '菜品还挂在不存在的类上');
 else ok('删除大类', '大类解散，' + orphan.length + ' 道菜回到未分类');
+
+/* ---------------- 安卓原生壳的安全区（顶栏被状态栏挡住的那个问题） ---------------- */
+
+if (!/html\.is-native\s*\{[^}]*--safe-t:\s*max\(env\(safe-area-inset-top/.test(cssText)) {
+  bad('CSS 有原生壳安全区兜底', '缺少 html.is-native { --safe-t: max(env(safe-area-inset-top), 36px) }');
+} else {
+  ok('CSS 有原生壳安全区兜底', '--safe-t: max(env(safe-area-inset-top), 36px)');
+}
+
+// 再开一个「假装自己是安卓壳」的实例：window.Capacitor 在的时候应该给 html 打上 is-native
+const nativeDom = new JSDOM(html, {
+  runScripts: 'dangerously',
+  pretendToBeVisual: true,
+  url: 'https://localhost/',
+  virtualConsole: new VirtualConsole(),
+  beforeParse(window) { stubBrowser(window, { native: true }); },
+});
+await wait(250);
+const nativeHtml = nativeDom.window.document.documentElement;
+if (!nativeHtml.classList.contains('is-native')) bad('原生壳里会给 html 加 is-native', 'class 没加上，顶栏还是会被状态栏压住');
+else ok('原生壳里会给 html 加 is-native');
+nativeDom.window.close();
 
 /* ---------------- 结果 ---------------- */
 

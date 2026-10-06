@@ -38,6 +38,18 @@
   color-scheme: light;
 }
 
+/*
+ * 安卓原生壳（Capacitor）里 WebView 是 edge-to-edge 的：内容一直画到状态栏下面，
+ * 而 env(safe-area-inset-top) 在不少机型的 WebView 上会返回 0——
+ * 结果顶栏（主题切换按钮）被状态栏压住，点不着。
+ * 所以原生壳里给个保底值：取「系统报的 inset」和「36px」中较大的那个。
+ * 用 max() 两边都不亏：系统报得更大就听系统的，报 0 就用保底值。
+ */
+html.is-native {
+  --safe-t: max(env(safe-area-inset-top, 0px), 36px);
+  --safe-b: max(env(safe-area-inset-bottom, 0px), 8px);
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 /*
@@ -107,15 +119,16 @@ body {
 .top-actions { display: flex; gap: 6px; }
 
 .icon-btn {
-  width: 34px; height: 34px;
+  width: 40px; height: 40px;
   display: grid; place-items: center;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--card);
   color: var(--text);
-  font-size: 15px;
+  font-size: 16px;
   cursor: pointer;
   transition: transform 0.15s, background 0.15s;
+  flex: 0 0 auto;
 }
 .icon-btn:active { transform: scale(0.92); }
 
@@ -205,6 +218,16 @@ body {
   animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.5, 1);
 }
 @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* 「就吃这个」之后的状态卡：把结果定下来，不再只是「再来一次」 */
+.decided-card {
+  background: linear-gradient(135deg, rgba(6, 214, 160, 0.16), rgba(255, 138, 61, 0.14));
+  border: 1px solid rgba(6, 214, 160, 0.45);
+  border-radius: var(--radius);
+  padding: 8px 12px 10px;
+  animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.5, 1);
+}
+.decided-card .result-name { background: linear-gradient(92deg, var(--ok), var(--brand-2)); -webkit-background-clip: text; background-clip: text; }
 .result-label { font-size: 11px; color: var(--text-dim); letter-spacing: 2px; }
 .result-name {
   font-size: clamp(20px, 5.2vmin, 30px);
@@ -364,12 +387,47 @@ input[type='checkbox']:indeterminate::after {
 .cat-item:hover { background: rgba(255, 255, 255, 0.03); }
 .item-name { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .cat-item.off .item-name { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--line); }
+
+/*
+ * 点按区域必须够大。
+ * 之前分类头和每道菜右边的按钮只有 18×18 像素（font-size 12px + padding 3px 5px），
+ * 手机上根本点不中——用户反馈「分类名字改不了」就是这个原因。
+ * 现在统一做成 34×34 的最小可点区域（Material 的推荐下限是 48，
+ * 但这里是列表里的次级操作，34 已经是能稳定点中的尺寸了）。
+ */
 .mini {
   border: none; background: transparent; color: var(--text-dim);
-  font-size: 12px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-family: inherit;
+  font-size: 15px; line-height: 1;
+  width: 34px; height: 34px; min-width: 34px;
+  display: grid; place-items: center;
+  border-radius: 9px; cursor: pointer; font-family: inherit;
+  padding: 0;
 }
-.mini:hover { background: var(--card); color: var(--text); }
-.mini.danger:hover { color: var(--danger); }
+.mini:hover, .mini:active { background: var(--card); color: var(--text); }
+.mini.danger:hover, .mini.danger:active { color: var(--danger); background: rgba(239, 71, 111, 0.12); }
+
+/* 大一点的主操作按钮（分类头右边那个「⋯」） */
+.mini.wide { width: auto; min-width: 44px; padding: 0 10px; font-size: 13px; font-weight: 600; }
+
+/* ---------------- 操作菜单（点「⋯」弹出来的那个） ---------------- */
+
+.sheet-list { display: flex; flex-direction: column; margin: 4px -4px 0; }
+.sheet-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 13px 10px;
+  background: none; border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 15px; font-family: inherit; text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.sheet-item:last-child { border-bottom: none; }
+.sheet-item:active { background: var(--card); }
+.sheet-item.danger { color: var(--danger); }
+.sheet-item-icon { width: 22px; text-align: center; font-size: 16px; }
+.sheet-item-hint { font-size: 11.5px; color: var(--text-dim); margin-left: auto; }
 .empty-tip { text-align: center; color: var(--text-dim); font-size: 12.5px; padding: 18px 10px; line-height: 1.7; }
 
 /* ---------------- 拍照识别 ---------------- */

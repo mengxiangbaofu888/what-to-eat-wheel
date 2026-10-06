@@ -8,6 +8,23 @@
 <meta name="theme-color" content="#151221">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23ff8a3d'/%3E%3Cpath d='M32 32 L32 4 A28 28 0 0 1 56.2 18 Z' fill='%23ffd166'/%3E%3Cpath d='M32 32 L56.2 18 A28 28 0 0 1 56.2 46 Z' fill='%23ef476f'/%3E%3Cpath d='M32 32 L56.2 46 A28 28 0 0 1 32 60 Z' fill='%2306d6a0'/%3E%3Cpath d='M32 32 L32 60 A28 28 0 0 1 7.8 46 Z' fill='%234cc9f0'/%3E%3Cpath d='M32 32 L7.8 46 A28 28 0 0 1 7.8 18 Z' fill='%23845ec2'/%3E%3Cpath d='M32 32 L7.8 18 A28 28 0 0 1 32 4 Z' fill='%23f78c6b'/%3E%3Ccircle cx='32' cy='32' r='7' fill='%23fff'/%3E%3C/svg%3E">
 <!-- INLINE:styles.css -->
+<script>
+  /*
+   * 尽早给 <html> 打上 is-native 标记。
+   * 安卓原生壳（Capacitor）里 WebView 是 edge-to-edge 的，内容会一直画到状态栏下面，
+   * 而 env(safe-area-inset-top) 在不少机型的 WebView 上返回 0——
+   * 结果顶栏（主题切换按钮）被状态栏压住，点不着。
+   * 放在 head 里是为了首屏第一次绘制就已经生效，不然会看到顶栏往下跳一下。
+   */
+  (function () {
+    try {
+      var c = window.Capacitor;
+      if (c && ((c.isNativePlatform && c.isNativePlatform()) || c.isNative)) {
+        document.documentElement.className += ' is-native';
+      }
+    } catch (e) { /* 普通浏览器里没有 Capacitor，这是正常的 */ }
+  })();
+</script>
 </head>
 <body>
 
@@ -34,12 +51,21 @@
     <div class="result-bar" id="result-bar">
       <div class="result-empty" id="result-empty">转一下，让天意决定今天吃啥 🍚</div>
       <div class="result-card" id="result-card" hidden>
-        <div class="result-label">今天就吃</div>
+        <div class="result-label">转到了</div>
         <div class="result-name" id="result-name">—</div>
         <div class="result-cat" id="result-cat"></div>
         <div class="result-actions">
+          <button class="btn primary sm" id="btn-done">✅ 就吃这个</button>
           <button class="btn ghost sm" id="btn-again">再转一次</button>
           <button class="btn ghost sm" id="btn-drop">从转盘移除</button>
+        </div>
+      </div>
+      <div class="decided-card" id="decided-card" hidden>
+        <div class="result-label">今天就吃它 🍚</div>
+        <div class="result-name" id="decided-name">—</div>
+        <div class="result-cat" id="decided-cat"></div>
+        <div class="result-actions">
+          <button class="btn ghost sm" id="btn-undecide">换一个</button>
         </div>
       </div>
       <div class="history" id="history"></div>
@@ -62,6 +88,7 @@
           <button class="btn primary" id="btn-add">添加</button>
         </div>
         <div class="chip-row">
+          <button class="btn tiny" id="btn-newcat">＋ 新建大类</button>
           <button class="btn tiny" id="btn-smart" title="按菜名后缀自动分大类，例如「麻辣鸡丁滑蛋饭 / 五花肉滑蛋饭」→ 大类「滑蛋饭」">✨ 智能归类</button>
           <button class="btn tiny" id="btn-all">全选</button>
           <button class="btn tiny" id="btn-none">全不选</button>

@@ -88,6 +88,13 @@
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
+  /** 本地日期，形如 2026-10-06。用它判断「今天」而不是 UTC，免得跨零点那几小时出错 */
+  function dayKey(ts) {
+    var d = ts ? new Date(ts) : new Date();
+    var p = function (n) { return n < 10 ? '0' + n : String(n); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+
   function mergeSettings(raw) {
     var s = clone(DEFAULT_SETTINGS);
     if (raw && typeof raw === 'object') {
@@ -103,7 +110,7 @@
   }
 
   function defaultData() {
-    return { version: 1, categories: [], items: [], history: [], settings: clone(DEFAULT_SETTINGS), seeded: false };
+    return { version: 1, categories: [], items: [], history: [], settings: clone(DEFAULT_SETTINGS), seeded: false, decided: null };
   }
 
   /** 首次打开给几道示例菜，好让人一眼看懂「大类 / 小项」怎么用 */
@@ -167,6 +174,7 @@
         if (Array.isArray(raw.items)) data.items = raw.items.map(normalizeItem).filter(function (i) { return i.name; });
         if (Array.isArray(raw.categories)) data.categories = raw.categories.map(normalizeCategory).filter(function (c) { return c.name; });
         if (Array.isArray(raw.history)) data.history = raw.history.slice(0, HISTORY_MAX);
+        if (raw.decided && typeof raw.decided === 'object' && raw.decided.name) data.decided = raw.decided;
         data.settings = mergeSettings(raw.settings);
         data.seeded = !!raw.seeded;
       }
@@ -383,6 +391,26 @@
     clearHistory: function () {
       data.history = [];
       save(); emit();
+    },
+
+    /* ------------------------------ 今天定了吃啥 ------------------------------ */
+
+    /** 记下「就吃这个」。带日期，这样第二天打开不会还显示昨天的决定。 */
+    setDecided: function (name, categoryId) {
+      data.decided = { name: String(name || ''), categoryId: categoryId || null, at: Date.now(), day: dayKey() };
+      save(); emit();
+    },
+
+    clearDecided: function () {
+      data.decided = null;
+      save(); emit();
+    },
+
+    /** 今天已经定过了？返回那条记录，否则 null */
+    todayDecided: function () {
+      var d = data.decided;
+      if (!d || d.day !== dayKey()) return null;
+      return d;
     },
 
     /* ------------------------------ 设置 ------------------------------ */

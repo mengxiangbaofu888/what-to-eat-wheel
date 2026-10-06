@@ -185,6 +185,32 @@
     });
   }
 
+  /**
+   * 操作菜单：一个标题 + 一列大按钮。
+   * 手机上比「一排小图标」好点太多——之前分类头的 ✏️🗑 只有 18px 宽，根本点不中。
+   * items: [{ text, icon, hint, danger, value }]
+   */
+  function sheet(opts) {
+    var body = el('div', { class: 'sheet-list' });
+    var resolved = false;
+    (opts.items || []).forEach(function (it) {
+      if (it.disabled) return;
+      body.appendChild(el('button', {
+        class: 'sheet-item' + (it.danger ? ' danger' : ''),
+        onclick: function () {
+          if (resolved) return;
+          resolved = true;
+          if (current) current.close(it.value === undefined ? it.text : it.value);
+        },
+      }, [
+        el('span', { class: 'sheet-item-icon', text: it.icon || '' }),
+        el('span', { text: it.text }),
+        it.hint ? el('span', { class: 'sheet-item-hint', text: it.hint }) : null,
+      ]));
+    });
+    return open({ title: opts.title, hint: opts.hint, body: body, actions: [{ text: '取消', value: null }] });
+  }
+
   function toast(message, type, ms) {
     if (!toastWrap) init();
     var node = el('div', { class: 'toast' + (type ? ' ' + type : ''), text: message });
@@ -256,5 +282,5 @@
     confettiRaf = global.requestAnimationFrame(frame);
   }
 
-  W.UI = { init: init, open: open, form: form, toast: toast, confetti: confetti, close: closeModal, panic: panic };
+  W.UI = { init: init, open: open, form: form, sheet: sheet, toast: toast, confetti: confetti, close: closeModal, panic: panic };
 })(window);

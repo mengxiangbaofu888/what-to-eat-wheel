@@ -88,8 +88,12 @@
       ]);
 
       if (!g.virtual) {
-        head.appendChild(el('button', { class: 'mini', title: '重命名', text: '✏️', onclick: function (e) { e.stopPropagation(); editCategory(g.id); } }));
-        head.appendChild(el('button', { class: 'mini danger', title: '删除大类', text: '🗑', onclick: function (e) { e.stopPropagation(); deleteCategory(g.id); } }));
+        head.appendChild(el('button', {
+          class: 'mini',
+          title: '大类操作',
+          text: '⋯',
+          onclick: function (e) { e.stopPropagation(); categoryMenu(g.id); },
+        }));
       }
       head.appendChild(el('span', { class: 'chev', text: '▾' }));
 
@@ -100,15 +104,97 @@
         var row = el('div', { class: 'cat-item' + (it.enabled ? '' : ' off') }, [
           cb,
           el('span', { class: 'item-name', text: it.name, title: it.name, onclick: function () { S.setEnabled(it.id, !it.enabled); } }),
-          el('button', { class: 'mini', title: '只转这一道', text: '🎯', onclick: function () { solo(it.id); } }),
-          el('button', { class: 'mini', title: '编辑', text: '✏️', onclick: function () { editItem(it.id); } }),
-          el('button', { class: 'mini danger', title: '删除', text: '🗑', onclick: function () { S.removeItem(it.id); UI.toast('已删除「' + it.name + '」'); } }),
+          el('button', { class: 'mini', title: '这道菜的操作', text: '⋯', onclick: function () { itemMenu(it.id); } }),
         ]);
         itemsBox.appendChild(row);
       });
 
       var group = el('div', { class: 'cat-group' + (g.collapsed ? ' collapsed' : '') }, [head, itemsBox]);
       list.appendChild(group);
+    });
+  }
+
+  /** 点大类右边的「⋯」：重命名 / 在这个大类下加菜 / 删除 */
+  function categoryMenu(id) {
+    var cat = S.findCategory(id);
+    if (!cat) return;
+    var count = S.itemsOf(id).length;
+    UI.sheet({
+      title: cat.name + '（' + count + ' 道菜）',
+      items: [
+        { icon: '✏️', text: '重命名这个大类', value: 'rename' },
+        { icon: '➕', text: '往这个大类里加菜', hint: '一行一个', value: 'add' },
+        { icon: '🎯', text: '只转这个大类里的菜', value: 'solo' },
+        { icon: '🗑', text: '删除这个大类', danger: true, hint: count ? count + ' 道菜' : '', value: 'delete' },
+      ],
+    }).then(function (v) {
+      if (v === 'rename') editCategory(id);
+      else if (v === 'add') addToCategory(id);
+      else if (v === 'solo') {
+        S.setAllEnabled(false);
+        S.setManyEnabled(S.itemsOf(id).map(function (i) { return i.id; }), true);
+        UI.toast('转盘上只留「' + cat.name + '」里的菜');
+      } else if (v === 'delete') deleteCategory(id);
+    });
+  }
+
+  /** 点某道菜右边的「⋯」 */
+  function itemMenu(id) {
+    var it = S.findItem(id);
+    if (!it) return;
+    var catName = it.categoryId ? ((S.findCategory(it.categoryId) || {}).name || '未分类') : '未分类';
+    UI.sheet({
+      title: it.name,
+      hint: '当前大类：' + catName,
+      items: [
+        { icon: '🎯', text: '只转这一道', value: 'solo' },
+        { icon: it.enabled ? '⭕' : '✅', text: it.enabled ? '从转盘上撤下来' : '放回转盘', value: 'toggle' },
+        { icon: '✏️', text: '改名 / 换大类', value: 'edit' },
+        { icon: '🗑', text: '删掉这道菜', danger: true, value: 'delete' },
+      ],
+    }).then(function (v) {
+      if (v === 'solo') solo(id);
+      else if (v === 'toggle') S.setEnabled(id, !it.enabled);
+      else if (v === 'edit') editItem(id);
+      else if (v === 'delete') { S.removeItem(id); UI.toast('已删除「' + it.name + '」'); }
+    });
+  }
+
+  /** 新建一个大类 */
+  function newCategoryFlow() {
+    UI.form({
+      title: '新建大类',
+      hint: '大类就是一组菜的共同归属，比如「滑蛋饭」「面食」「麻辣香锅」。建好之后可以把菜放进去，也可以勾选整个大类一起转。',
+      fields: [{ key: 'name', label: '大类名字', placeholder: '例如：滑蛋饭', value: '' }],
+      okText: '创建',
+    }).then(function (res) {
+      if (!res) return;
+      var name = String(res.values.name || '').trim();
+      if (!name) { UI.toast('名字不能是空的', 'err'); return; }
+      var exist = S.categoryByName(name);
+      if (exist) { UI.toast('已经有一个叫「' + name + '」的大类了', 'err'); return; }
+      S.addCategory(name);
+      UI.toast('已创建大类「' + name + '」', 'ok');
+      // 顺手问一句要不要马上往里加菜，省得用户再去找
+      setTimeout(function () { addToCategory(S.categoryByName(name).id, true); }, 350);
+    });
+  }
+
+  /** 往某个大类里批量加菜 */
+  function addToCategory(catId, justCreated) {
+    var cat = S.findCategory(catId);
+    if (!cat) return;
+    UI.form({
+      title: '往「' + cat.name + '」里加菜',
+      hint: '一行一个，也可以用顿号/逗号分隔。',
+      fields: [{ key: 'names', label: '菜名', type: 'textarea', rows: 5, value: '', placeholder: '麻辣鸡丁滑蛋饭\n五花肉滑蛋饭' }],
+      okText: '加进去',
+      cancelText: justCreated ? '先不加' : '取消',
+    }).then(function (res) {
+      if (!res) return;
+      var r = addNamesInto(res.values.names, catId);
+      if (!r.added && !r.dup) { UI.toast('没看到菜名', 'err'); return; }
+      UI.toast('往「' + cat.name + '」加了 ' + r.added + ' 道' + (r.dup ? '，' + r.dup + ' 道已存在' : ''), 'ok');
     });
   }
 
@@ -123,19 +209,44 @@
   function editItem(id) {
     var it = S.findItem(id);
     if (!it) return;
-    var options = [{ value: '', label: '（未分类）' }].concat(S.data.categories.map(function (c) { return { value: c.id, label: c.name }; }));
+    var NEW = '__new__';
+    var options = [{ value: '', label: '（未分类）' }]
+      .concat(S.data.categories.map(function (c) { return { value: c.id, label: c.name }; }))
+      .concat([{ value: NEW, label: '＋ 新建一个大类…' }]);
     UI.form({
-      title: '编辑菜品',
+      title: '改名 / 换大类',
       fields: [
         { key: 'name', label: '菜名', value: it.name },
-        { key: 'categoryId', label: '归属大类', type: 'select', options: options, value: it.categoryId || '' },
+        { key: 'categoryId', label: '归属大类', type: 'select', options: options, value: it.categoryId || '', hint: '选「＋ 新建一个大类…」可以现场建一个新的' },
       ],
-      extra: [{ text: '删除', danger: true, value: 'delete' }],
+      extra: [{ text: '删掉这道菜', danger: true, value: 'delete' }],
       okText: '保存',
     }).then(function (res) {
       if (!res) return;
       if (res.action === 'delete') { S.removeItem(id); UI.toast('已删除'); return; }
-      S.updateItem(id, { name: res.values.name, categoryId: res.values.categoryId || null });
+      var name = String(res.values.name || '').trim();
+      var catId = res.values.categoryId || null;
+
+      if (catId === NEW) {
+        // 先问大类叫什么，再回来保存这道菜
+        UI.form({
+          title: '新建大类',
+          fields: [{ key: 'name', label: '大类名字', placeholder: '例如：滑蛋饭', value: '' }],
+          okText: '创建并归入',
+        }).then(function (r2) {
+          if (!r2) return;
+          var catName = String(r2.values.name || '').trim();
+          if (!catName) { UI.toast('名字不能是空的', 'err'); return; }
+          var exist = S.categoryByName(catName);
+          var cat = exist || S.addCategory(catName);
+          if (!cat) return;
+          S.updateItem(id, { name: name, categoryId: cat.id });
+          UI.toast('已保存到「' + cat.name + '」', 'ok');
+        });
+        return;
+      }
+
+      S.updateItem(id, { name: name, categoryId: catId });
       UI.toast('已保存');
     });
   }
@@ -190,29 +301,42 @@
       .filter(Boolean);
   }
 
-  /** 真正把菜名写进数据，返回统计结果 */
-  function addNames(raw) {
+  /** 真正把菜名写进数据，返回统计结果。forcedCatId 不为空时，全部归进那一个大类 */
+  function addNames(raw, forcedCatId) {
     var names = parseNames(raw);
     var added = 0, dup = 0, grouped = [];
     names.forEach(function (name) {
-      if (S.itemByName(name)) { dup++; return; }
-      var sug = W.Classify.suggestForNew(name, S.data.items, S.data.categories);
-      var catId = null;
-      if (sug && sug.categoryId) {
-        catId = sug.categoryId;
-      } else if (sug && sug.newCategoryName) {
-        var cat = S.addCategory(sug.newCategoryName, true);
-        catId = cat.id;
-        S.data.items.forEach(function (it) {
-          if (it.id === sug.mateItemId && !it.categoryId) it.categoryId = cat.id;
-        });
-        grouped.push(sug.newCategoryName);
+      var exist = S.itemByName(name);
+      if (exist) {
+        // 已经有的菜：如果指定了目标大类、而它现在没归类，就顺手挪进去
+        if (forcedCatId && !exist.categoryId) S.updateItem(exist.id, { categoryId: forcedCatId });
+        dup++;
+        return;
+      }
+      var catId = forcedCatId || null;
+      if (!catId) {
+        var sug = W.Classify.suggestForNew(name, S.data.items, S.data.categories);
+        if (sug && sug.categoryId) {
+          catId = sug.categoryId;
+        } else if (sug && sug.newCategoryName) {
+          var cat = S.addCategory(sug.newCategoryName, true);
+          catId = cat.id;
+          S.data.items.forEach(function (it) {
+            if (it.id === sug.mateItemId && !it.categoryId) it.categoryId = cat.id;
+          });
+          grouped.push(sug.newCategoryName);
+        }
       }
       S.addItem(name, catId, true);
       added++;
     });
     if (added) { S.save(true); S.emit(); }
     return { added: added, dup: dup, grouped: grouped };
+  }
+
+  /** 指定大类地批量加菜（给「往这个大类里加菜」用） */
+  function addNamesInto(raw, categoryId) {
+    return addNames(raw, categoryId);
   }
 
   function addResultToast(r, silent) {
@@ -291,6 +415,7 @@
     if (wheel.spinning) return;
     wheel.setItems(items);
     els.resultCard.hidden = true;
+    els.decidedCard.hidden = true;
     els.resultEmpty.hidden = false;
     els.btnSpin.disabled = true;
     W.Sound.enabled = !!S.settings.sound;
@@ -314,11 +439,42 @@
     var cat = item.categoryId ? S.findCategory(item.categoryId) : null;
     els.resultName.textContent = item.name;
     els.resultCat.textContent = cat ? '大类：' + cat.name : '';
+    els.decidedCard.hidden = true;
     els.resultEmpty.hidden = true;
     els.resultCard.hidden = false;
     els.resultCard.style.animation = 'none';
     void els.resultCard.offsetWidth;
     els.resultCard.style.animation = '';
+  }
+
+  /**
+   * 「就吃这个」：把结果定下来。
+   * 以前转完只有「再转一次」和「从转盘移除」——想收手只能按返回键，
+   * 所以补一个明确的「结束」动作，并把决定记下来（当天有效）。
+   */
+  function decideCurrent(item) {
+    if (!item) return;
+    els.resultCard.hidden = true;   // 先收起结果卡，再让「已定」卡接管（顺序反了会被它顶掉）
+    S.setDecided(item.name, item.categoryId || null);
+    S.addHistory(item.name);
+    if (S.settings.confetti) UI.confetti();
+    UI.toast('今天就吃「' + item.name + '」！', 'ok', 3000);
+  }
+
+  function renderDecided() {
+    var d = S.todayDecided();
+    if (!d) {
+      els.decidedCard.hidden = true;
+      return false;
+    }
+    // 刚转出结果、还没点「就吃这个」时，别把「已定」卡顶上来
+    if (!els.resultCard.hidden) return false;
+    var cat = d.categoryId ? S.findCategory(d.categoryId) : null;
+    els.decidedName.textContent = d.name;
+    els.decidedCat.textContent = cat ? '大类：' + cat.name : '';
+    els.decidedCard.hidden = false;
+    els.resultEmpty.hidden = true;
+    return true;
   }
 
   function renderHistory() {
@@ -591,9 +747,12 @@
         '<li><b>加菜</b>：在「🍽 菜品」里打字回车就能加；一行一个可以一次加一串。</li>',
         '<li><b>大类 / 小项</b>：像「麻辣鸡丁滑蛋饭」「五花肉滑蛋饭」会自动归到「滑蛋饭」这个大类。' +
           '勾大类 = 把这个大类下的都放上转盘；只勾某一道 = 只转那一道。</li>',
+        '<li><b>自己建大类</b>：点「＋ 新建大类」就能建一个自己的分类；' +
+          '想改名或删除，点大类右边那个 <b>⋯</b>；想给某道菜换大类，点这道菜右边的 <b>⋯</b>。</li>',
         '<li><b>智能归类</b>：如果菜名没归好，点一下「✨ 智能归类」，它会按菜名后缀重新分大类。</li>',
         '<li><b>拍照识别</b>：拍一张食堂菜牌，自动认出菜名再加进转盘。需要先在「⚙️ 设置」里填一个视觉模型的 API Key。</li>',
-        '<li><b>转盘</b>：点中间那个「转」，停下来指到哪道就吃哪道。手机可以直接点转盘中间。</li>',
+        '<li><b>转盘</b>：点中间那个「转」，停下来指到哪道就吃哪道。' +
+          '转完可以点「✅ 就吃这个」把决定定下来，也可以「再转一次」或者把它从转盘撤掉。</li>',
         '<li><b>数据在哪</b>：全部存在这台设备本地，不上传。换设备用「设置 → 导出备份 / 导入备份」。</li>',
         '</ul>',
         '<p>小技巧：把网页「添加到主屏幕」，就跟装了个 App 一样，全屏、离线都能用。</p>',
@@ -616,10 +775,16 @@
     els.resultCat = $('result-cat');
     els.btnAgain = $('btn-again');
     els.btnDrop = $('btn-drop');
+    els.btnDone = $('btn-done');
+    els.decidedCard = $('decided-card');
+    els.decidedName = $('decided-name');
+    els.decidedCat = $('decided-cat');
+    els.btnUndecide = $('btn-undecide');
     els.history = $('history');
 
     els.addInput = $('add-input');
     els.btnAdd = $('btn-add');
+    els.btnNewCat = $('btn-newcat');
     els.btnSmart = $('btn-smart');
     els.btnAll = $('btn-all');
     els.btnNone = $('btn-none');
@@ -666,6 +831,14 @@
 
     els.btnSpin.addEventListener('click', spin);
     els.btnAgain.addEventListener('click', spin);
+    els.btnDone.addEventListener('click', function () {
+      if (lastPicked) decideCurrent(lastPicked);
+    });
+    els.btnUndecide.addEventListener('click', function () {
+      S.clearDecided();
+      els.decidedCard.hidden = true;
+      els.resultEmpty.hidden = false;
+    });
     els.btnDrop.addEventListener('click', function () {
       if (!lastPicked) return;
       S.setEnabled(lastPicked.id, false);
@@ -680,6 +853,7 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doAdd(); }
     });
     els.addInput.addEventListener('paste', onPaste);
+    els.btnNewCat.addEventListener('click', newCategoryFlow);
     els.btnSmart.addEventListener('click', doSmartGroup);
     els.btnAll.addEventListener('click', function () { S.setAllEnabled(true); });
     els.btnNone.addEventListener('click', function () { S.setAllEnabled(false); });
@@ -763,6 +937,14 @@
     applyTheme();
     fillProviders();
 
+    // 安卓原生壳里 WebView 是 edge-to-edge 的，而 env(safe-area-inset-top) 常常是 0，
+    // 顶栏会被状态栏压住。打上这个 class 后 CSS 会给一个保底的安全区高度。
+    try {
+      var cap = global.Capacitor;
+      var isNative = !!(cap && ((cap.isNativePlatform && cap.isNativePlatform()) || cap.isNative));
+      if (isNative) document.documentElement.classList.add('is-native');
+    } catch (e) { /* 不是原生壳就算了 */ }
+
     wheel = new W.Wheel($('wheel'));
     W.Sound.enabled = !!S.settings.sound;
 
@@ -778,6 +960,7 @@
       renderList();
       renderHistory();
       renderStats();
+      renderDecided();
     });
 
     bind();
@@ -786,6 +969,7 @@
     renderList();
     renderHistory();
     renderStats();
+    renderDecided();
     setTimeout(function () { wheel.resize(); }, 60);
 
     var seenHelp = false;
