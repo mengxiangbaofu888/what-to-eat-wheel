@@ -81,6 +81,9 @@
     this.highlightIndex = -1;
     this.onTick = options.onTick || null;
     this.raf = null;
+    this._labelCache = {};    // fitText 的结果缓存，转动时每帧都要用
+    this._cacheCount = 0;
+    this.fontKey = '';        // 当前字号，作为缓存 key 的一部分
     this.resize();
   }
 
@@ -104,6 +107,27 @@
     this.draw();
   };
 
+  /**
+   * 按指定的 CSS 尺寸重设画布。
+   *
+   * 和 resize() 的区别：resize() 是去量元素当前的矩形，而这里直接用调用方算好的目标尺寸。
+   * 需要它是因为轮盘容器现在带 CSS 过渡（出结果时转盘会让出空间，尺寸是渐变的），
+   * 过渡途中量到的都是中间值，按中间值设位图，画出来的字会一阵一阵发糊。
+   * 直接按最终尺寸设，过渡期间只是等比缩放，过渡结束刚好精确吻合。
+   */
+  Wheel.prototype.resizeTo = function (cssSize) {
+    var dpr = Math.min(global.devicePixelRatio || 1, 3);
+    cssSize = Math.max(120, Math.round(cssSize));
+    if (this.size === cssSize && this.dpr === dpr) return;
+    this.size = cssSize;
+    this.dpr = dpr;
+    this.canvas.width = Math.round(cssSize * dpr);
+    this.canvas.height = Math.round(cssSize * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.radius = cssSize / 2 - 6;
+    this.draw();
+  };
+
   /** 估算一段文字的宽度（以字号为单位）：中文算 1 个字，英文数字算 0.56 个 */
   function textUnits(s) {
     var u = 0;
@@ -114,15 +138,33 @@
     return u || 1;
   }
 
+  /**
+   * 按最大宽度把文字截断（超出就加省略号）。
+   *
+   * 带缓存：转动时每一帧都会重画整个转盘，扇区一多就是每帧几十次二分测量，
+   * 低端机上会明显掉帧。而转动过程中文字内容和字号都不变，结果完全可以复用。
+   */
   Wheel.prototype.fitText = function (text, maxWidth) {
     var ctx = this.ctx;
-    if (ctx.measureText(text).width <= maxWidth) return text;
-    var lo = 1, hi = text.length;
-    while (lo < hi) {
-      var mid = Math.ceil((lo + hi) / 2);
-      if (ctx.measureText(text.slice(0, mid) + '…').width <= maxWidth) lo = mid; else hi = mid - 1;
+    var key = text + '\u0000' + this.fontKey + '\u0000' + Math.round(maxWidth);
+    var cached = this._labelCache[key];
+    if (cached !== undefined) return cached;
+    var result;
+    if (ctx.measureText(text).width <= maxWidth) {
+      result = text;
+    } else {
+      var lo = 1, hi = text.length;
+      while (lo < hi) {
+        var mid = Math.ceil((lo + hi) / 2);
+        if (ctx.measureText(text.slice(0, mid) + '…').width <= maxWidth) lo = mid; else hi = mid - 1;
+      }
+      result = text.slice(0, Math.max(1, lo)) + '…';
     }
-    return text.slice(0, Math.max(1, lo)) + '…';
+    // 缓存别无限涨：换个字号/换一批菜就会产生新 key，太多了直接清空重来
+    if (this._cacheCount > 400) { this._labelCache = {}; this._cacheCount = 0; }
+    this._labelCache[key] = result;
+    this._cacheCount++;
+    return result;
   };
 
   Wheel.prototype.draw = function () {
@@ -173,6 +215,8 @@
     var byArc = step * (R * 0.62) * 0.72;
     var fontSize = U.clamp(Math.min(26, size * 0.075, byArc, byName), 10, 26);
     var showText = byArc >= 10;
+    // 记下当前字号：fitText 的缓存 key 用它，字号一变缓存自然失效
+    this.fontKey = fontSize.toFixed(1) + '@' + size;
 
     for (var i = 0; i < n; i++) {
       var a0 = this.rotation + i * step;

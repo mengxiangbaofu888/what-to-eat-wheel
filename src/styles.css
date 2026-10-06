@@ -20,6 +20,9 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+  --stage-gap: 10px;
+  /* 转盘兜底尺寸：正常由 js 算出行内尺寸覆盖它 */
+  --wheel-fallback-size: min(78vw, 34vh, 420px);
   color-scheme: dark;
 }
 
@@ -141,16 +144,28 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: var(--stage-gap);
+  padding: 2px 0 4px;   /* 给转盘外圈的阴影留一点余地，别被裁掉 */
 }
 
+/*
+ * 转盘的尺寸由 app.js 的 layoutWheel() 算出来写成行内 width/height。
+ *
+ * 为什么不能只用 CSS 的 min(78vw, 42vh, 420px)：
+ *   42vh 是个写死的猜测，它不知道「结果卡片」出现后要多占一百多像素。
+ *   实测在手机上出结果时，stage 的内容比可用高度多出 80 多像素，
+ *   于是结果卡片溢出去，被后面的 .panel（有背景、有 backdrop-filter）盖住——
+ *   三个按钮只能看到上半截，点都点不全。
+ * 这里保留一个同名的兜底尺寸，万一 JS 没跑起来（或者首帧还没算），布局也不塌。
+ */
 .wheel-wrap {
   position: relative;
-  width: min(78vw, 42vh, 420px);
+  width: var(--wheel-fallback-size);
   aspect-ratio: 1 / 1;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
+  transition: width 0.28s cubic-bezier(0.3, 0.9, 0.4, 1), height 0.28s cubic-bezier(0.3, 0.9, 0.4, 1);
 }
 
 #wheel {
@@ -206,16 +221,28 @@ body {
   width: 100%;
   max-width: 560px;
   text-align: center;
-  min-height: 30px;
+  min-height: 28px;
+  transition: min-height 0.2s;
 }
 .result-empty { color: var(--text-dim); font-size: 13px; }
-.result-card {
+
+/*
+ * 结果卡片做得紧凑些：手机上纵向空间本来就紧张，
+ * 卡片每高一点，转盘就得让出一点。所以第 2、3 个按钮排一行，
+ * 文字也收一档，尽量少占高度。
+ */
+.result-card, .decided-card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 8px 12px 10px;
+  padding: 6px 10px 8px;
   backdrop-filter: blur(10px);
-  animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.5, 1);
+  animation: riseIn 0.32s cubic-bezier(0.2, 1.1, 0.4, 1);
+}
+/* 结果区从下方轻轻浮上来，比单纯缩放更自然，也不会显得「被裁掉一截」 */
+@keyframes riseIn {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 @keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
@@ -223,9 +250,6 @@ body {
 .decided-card {
   background: linear-gradient(135deg, rgba(6, 214, 160, 0.16), rgba(255, 138, 61, 0.14));
   border: 1px solid rgba(6, 214, 160, 0.45);
-  border-radius: var(--radius);
-  padding: 8px 12px 10px;
-  animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.5, 1);
 }
 .decided-card .result-name { background: linear-gradient(92deg, var(--ok), var(--brand-2)); -webkit-background-clip: text; background-clip: text; }
 .result-label { font-size: 11px; color: var(--text-dim); letter-spacing: 2px; }
@@ -238,10 +262,11 @@ body {
   color: transparent;
   word-break: break-all;
 }
-.result-cat { font-size: 12px; color: var(--text-dim); margin-top: -2px; }
-.result-actions { display: flex; gap: 8px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+.result-cat { font-size: 11.5px; color: var(--text-dim); margin-top: -2px; }
+.result-actions { display: flex; gap: 6px; justify-content: center; margin-top: 6px; flex-wrap: wrap; }
+.result-actions .btn { flex: 0 1 auto; }
 
-.history { margin-top: 6px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.history { margin-top: 5px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 .history-chip {
   font-size: 11px;
   color: var(--text-dim);

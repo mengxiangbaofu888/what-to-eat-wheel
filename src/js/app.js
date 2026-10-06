@@ -398,6 +398,32 @@
 
   /* ============================== 转盘 ============================== */
 
+  /*
+   * 转盘大小按「实际剩下的空间」算，不能写死 vh。
+   *
+   * 原因：出结果时下面的结果卡片会多占一百多像素。转盘尺寸如果按 42vh 写死，
+   * .stage 的内容就会比可用高度高出一截；溢出的那部分被后面的 .panel 压住
+   * （panel 自己有背景和 backdrop-filter，是实打实盖在上面的），
+   * 结果就是「✅ 就吃这个」那排按钮只看得到上半截，点都点不全。
+   *
+   * 算法：可用高度 = stage 高度 − 结果区高度 − 间距 − 阴影余量，
+   * 再跟宽度、420px 上限取最小，最后夹在 176px 以上（再小就没法看了）。
+   */
+  function layoutWheel() {
+    if (!wheel || !els.stage || !els.wheelWrap || !els.resultBar) return;
+    var stageH = els.stage.clientHeight;
+    var stageW = els.stage.clientWidth;
+    if (!stageH || !stageW) return;
+    var availH = stageH - (els.resultBar.offsetHeight || 28) - 10 - 8;
+    var size = Math.max(176, Math.floor(Math.min(stageW * 0.82, availH, 420)));
+    if (els.wheelWrap.dataset.size === String(size)) return;   // 没变就别折腾
+    els.wheelWrap.dataset.size = String(size);
+    els.wheelWrap.style.width = size + 'px';
+    els.wheelWrap.style.height = size + 'px';
+    // 直接按目标尺寸设画布位图：容器尺寸是带过渡的，等它过渡完再量会糊一阵子
+    wheel.resizeTo(size);
+  }
+
   function syncWheel() {
     var items = S.enabledItems();
     wheel.setItems(items);
@@ -417,6 +443,7 @@
     els.resultCard.hidden = true;
     els.decidedCard.hidden = true;
     els.resultEmpty.hidden = false;
+    layoutWheel();   // 结果收起来了，转盘可以把空间拿回来
     els.btnSpin.disabled = true;
     W.Sound.enabled = !!S.settings.sound;
     els.btnSpin.classList.add('spinning');
@@ -445,6 +472,9 @@
     els.resultCard.style.animation = 'none';
     void els.resultCard.offsetWidth;
     els.resultCard.style.animation = '';
+    // 结果卡片占位变了，重算转盘尺寸：不然卡片下半截会被下面的面板盖住
+    layoutWheel();
+    global.requestAnimationFrame(layoutWheel);
   }
 
   /**
@@ -464,7 +494,11 @@
   function renderDecided() {
     var d = S.todayDecided();
     if (!d) {
-      els.decidedCard.hidden = true;
+      if (!els.decidedCard.hidden) {
+        els.decidedCard.hidden = true;
+        layoutWheel();
+        global.requestAnimationFrame(layoutWheel);
+      }
       return false;
     }
     // 刚转出结果、还没点「就吃这个」时，别把「已定」卡顶上来
@@ -474,6 +508,8 @@
     els.decidedCat.textContent = cat ? '大类：' + cat.name : '';
     els.decidedCard.hidden = false;
     els.resultEmpty.hidden = true;
+    layoutWheel();
+    global.requestAnimationFrame(layoutWheel);
     return true;
   }
 
@@ -771,6 +807,8 @@
     els.resultBar = $('result-bar');
     els.resultEmpty = $('result-empty');
     els.resultCard = $('result-card');
+    els.wheelWrap = document.querySelector('.wheel-wrap');
+    els.stage = document.querySelector('.stage');
     els.resultName = $('result-name');
     els.resultCat = $('result-cat');
     els.btnAgain = $('btn-again');
@@ -838,6 +876,7 @@
       S.clearDecided();
       els.decidedCard.hidden = true;
       els.resultEmpty.hidden = false;
+      layoutWheel();
     });
     els.btnDrop.addEventListener('click', function () {
       if (!lastPicked) return;
@@ -846,6 +885,7 @@
       els.resultCard.hidden = true;
       els.resultEmpty.hidden = false;
       lastPicked = null;
+      layoutWheel();
     });
 
     els.btnAdd.addEventListener('click', doAdd);
@@ -948,11 +988,13 @@
     wheel = new W.Wheel($('wheel'));
     W.Sound.enabled = !!S.settings.sound;
 
-    var wrap = document.querySelector('.wheel-wrap');
+    // stage 尺寸变了（转屏、键盘弹出）→ 重算
     if (global.ResizeObserver) {
-      new global.ResizeObserver(function () { wheel.resize(); }).observe(wrap);
+      new global.ResizeObserver(function () { layoutWheel(); }).observe(els.stage);
+      // 结果区高度变了（出结果 / 收起结果）→ 重算。这是这次遮挡问题的关键。
+      new global.ResizeObserver(function () { layoutWheel(); }).observe(els.resultBar);
     } else {
-      global.addEventListener('resize', function () { wheel.resize(); });
+      global.addEventListener('resize', function () { layoutWheel(); });
     }
 
     S.on(function () {
@@ -970,7 +1012,10 @@
     renderHistory();
     renderStats();
     renderDecided();
-    setTimeout(function () { wheel.resize(); }, 60);
+    // 首帧先把转盘尺寸算准（等一帧让 flex 布局落地）
+    layoutWheel();
+    setTimeout(layoutWheel, 60);
+    setTimeout(layoutWheel, 260);   // 字体/安全区最终定了之后再保险算一次
 
     var seenHelp = false;
     try {

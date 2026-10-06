@@ -54,12 +54,37 @@ function stubBrowser(window, opts = {}) {
     ctx.canvas = this;
     return ctx;
   };
-  // jsdom 的布局都是 0，给个固定尺寸，让转盘按真实大小算
+  // jsdom 的布局全是 0，给一套「假的高度模型」，
+  // 这样才有可能验出「结果卡片变高 → 转盘让出空间」这类跟高度有关的逻辑。
+  // （这正是不好验的那类 bug：jsdom 不做真实布局，之前结果卡片被面板盖住就是这么漏过去的。）
+  const HEIGHTS = { stageH: 420, stageW: 380, barEmpty: 28, barResult: 122 };
+  const h = (el, prop) => {
+    if (!el || !el.classList) return 360;
+    if (el.classList.contains('stage')) return prop === 'width' ? HEIGHTS.stageW : HEIGHTS.stageH;
+    if (el.id === 'result-bar') {
+      const card = el.querySelector('#result-card');
+      const decided = el.querySelector('#decided-card');
+      const shown = (card && !card.hidden) || (decided && !decided.hidden);
+      return shown ? HEIGHTS.barResult : HEIGHTS.barEmpty;
+    }
+    return 360;
+  };
   window.Element.prototype.getBoundingClientRect = function () {
     return { width: 360, height: 360, top: 0, left: 0, right: 360, bottom: 360, x: 0, y: 0 };
   };
-  Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', { get: () => 360, configurable: true });
-  Object.defineProperty(window.HTMLElement.prototype, 'offsetHeight', { get: () => 360, configurable: true });
+  Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', {
+    get() { return h(this, 'width'); }, configurable: true,
+  });
+  Object.defineProperty(window.HTMLElement.prototype, 'offsetHeight', {
+    get() { return h(this, 'height'); }, configurable: true,
+  });
+  Object.defineProperty(window.Element.prototype, 'clientHeight', {
+    get() { return h(this, 'height'); }, configurable: true,
+  });
+  Object.defineProperty(window.Element.prototype, 'clientWidth', {
+    get() { return h(this, 'width'); }, configurable: true,
+  });
+  window.__HEIGHTS = HEIGHTS;
 }
 
 const dom = new JSDOM(html, {
@@ -205,6 +230,10 @@ else ok('全选', `${S.enabledItems().length} 道`);
 /* ---------------- 转盘 ---------------- */
 
 const spinBtn = $('#btn-spin');
+const wheelWrap = $('.wheel-wrap');
+const resultBar = $('#result-bar');
+const sizeBefore = parseInt(wheelWrap.style.width, 10) || 0;
+
 S.setSetting('duration', 1.2);   // 测试里别真等 4.5 秒
 await wait(20);
 click(spinBtn);
@@ -219,6 +248,26 @@ else {
 }
 if (!S.data.history.length) bad('历史记录', '没记录');
 else ok('历史记录', S.data.history.slice(0, 3).join('、'));
+
+/*
+ * 出结果后必须「谁都别挡谁」。
+ * 这是线上那个 bug 的等价条件：结果卡片出现时，stage 的内容总高
+ * （转盘 + 间距 + 结果区）如果超过 stage 的高度就会溢出，
+ * 而 .panel 有自己的背景，会把溢出的下半截盖住——按钮就点不全了。
+ */
+const sizeAfter = parseInt(wheelWrap.style.width, 10) || 0;
+const stageH = window.__HEIGHTS.stageH;
+const barH = resultBar.offsetHeight;
+const need = sizeAfter + 10 + barH;
+if (!sizeAfter) bad('结果出现后转盘有尺寸', 'wheel-wrap 没有算出宽度');
+else if (need > stageH) bad('出结果后不能被面板遮挡', `内容需要 ${need}px，但 stage 只有 ${stageH}px（转盘 ${sizeAfter} + 间距 10 + 结果区 ${barH}）`);
+else ok('出结果后不能被面板遮挡', `内容 ${need}px ≤ stage ${stageH}px（转盘让位到 ${sizeAfter}px）`);
+
+if (sizeBefore && sizeAfter >= sizeBefore) {
+  bad('转盘应该为结果卡片让出空间', `出结果前 ${sizeBefore}px，出结果后还是 ${sizeAfter}px`);
+} else if (sizeBefore) {
+  ok('转盘应该为结果卡片让出空间', `${sizeBefore}px → ${sizeAfter}px`);
+}
 
 /* ---------------- 「就吃这个」把结果定下来 ---------------- */
 
