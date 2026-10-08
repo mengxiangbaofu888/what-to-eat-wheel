@@ -1,6 +1,6 @@
 {
   "name": "what-to-eat-wheel",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "description": "吃啥转盘 · 自定义菜名 + 拍照识别食堂菜品 + 大类/小项多选 + 转盘随机决定今天吃啥",
@@ -17,8 +17,9 @@
   "author": "mengxiangbaofu",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node scripts/build.mjs && node scripts/test-classify.mjs && node scripts/smoke-test.mjs",
+    "test": "node scripts/build.mjs && node scripts/test-classify.mjs && node scripts/test-vision-errors.mjs && node scripts/smoke-test.mjs",
     "test:classify": "node scripts/test-classify.mjs",
+    "test:vision": "node scripts/test-vision-errors.mjs",
     "test:smoke": "node scripts/build.mjs && node scripts/smoke-test.mjs",
     "serve": "node scripts/build.mjs && node scripts/serve.mjs",
     "apk": "node scripts/build-apk.mjs",

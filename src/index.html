@@ -131,7 +131,9 @@
         </div>
         <div class="field">
           <label class="label" for="set-model">模型名</label>
-          <input class="input" id="set-model" type="text" spellcheck="false" placeholder="qwen-vl-max">
+          <input class="input" id="set-model" type="text" spellcheck="false" placeholder="glm-4.6v-flash">
+          <div class="hint warn-hint">⚠️ 必须是<b>能看图的模型</b>（名字里通常带 <code>v</code> / <code>vl</code> / <code>vision</code>）。
+            纯文字模型填进来会「测试通过」但一拍照就报错。</div>
         </div>
         <div class="field">
           <label class="label" for="set-apikey">API Key</label>

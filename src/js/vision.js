@@ -24,12 +24,45 @@
     return url + '/chat/completions';
   }
 
+  /**
+   * 扫描一段 JSON 文本，找出「完整元素」的结束位置。
+   *
+   * 用来对付**被截断的 JSON**：模型输出到一半撞上 max_tokens，
+   * 最后一个菜品对象往往是残的（`{"name":"五花`），但它前面的都是好的。
+   */
+  function scanCompleteItems(s, arrStart) {
+    var depth = 0, inStr = false, esc = false;
+    var ends = [];
+    for (var i = arrStart; i < s.length; i++) {
+      var ch = s[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '[' || ch === '{') depth++;
+      else if (ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 1) ends.push(i);      // 回到数组层 = 一个元素收尾了
+        if (depth === 0) break;             // 整个数组结束
+      }
+    }
+    return ends;
+  }
+
   function extractJson(text) {
     var s = String(text || '').trim();
     s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    try { return JSON.parse(s); } catch (e) { /* 继续找 */ }
+    var firstErr = null;
+
+    try { return JSON.parse(s); } catch (e) { firstErr = e; }
+
     var starts = [s.indexOf('{'), s.indexOf('[')].filter(function (i) { return i >= 0; });
-    if (!starts.length) throw new Error('模型没有返回 JSON：' + s.slice(0, 120));
+    if (!starts.length) {
+      throw apiError('模型没有按格式返回 JSON。它说的是：' + s.slice(0, 120), 0);
+    }
     var from = Math.min.apply(null, starts);
     var openCh = s[from];
     var closeCh = openCh === '{' ? '}' : ']';
@@ -46,8 +79,39 @@
       if (ch === openCh) depth++;
       else if (ch === closeCh) { depth--; if (depth === 0) { end = i; break; } }
     }
-    var raw = end >= 0 ? s.slice(from, end + 1) : s.slice(from);
-    return JSON.parse(raw);
+
+    if (end >= 0) {
+      // 括号配平了，说明结构完整，解析失败只可能是内容本身有问题
+      try { return JSON.parse(s.slice(from, end + 1)); } catch (e) { firstErr = e; }
+    }
+
+    /*
+     * 走到这里说明 JSON 不完整（多半是被 max_tokens 截断了）。
+     * 不要整段丢掉——把已经完整的那些菜品救出来，总比让用户重拍一次强。
+     */
+    var arrStart = s.indexOf('[', from);
+    if (arrStart >= 0) {
+      var ends = scanCompleteItems(s, arrStart);
+      if (ends.length) {
+        var salvaged = s.slice(arrStart, ends[ends.length - 1] + 1) + ']';
+        try {
+          var arr = JSON.parse(salvaged);
+          if (Array.isArray(arr) && arr.length) {
+            arr.__salvaged = true;   // 让上层知道「这是从截断的输出里救出来的」
+            return arr;
+          }
+        } catch (e) { /* 救不回来就算了 */ }
+      }
+    }
+
+    // 实在解析不了，给一句人话——绝不能把 JSON.parse 的英文异常直接甩给用户
+    throw apiError(
+      '模型返回的内容不是合法 JSON，解析不了。' +
+      '多半是它没按要求只输出 JSON，或者输出太长被截断了（这次大约 ' + s.length + ' 个字符）。' +
+      '可以再试一次；老是这样就在设置里换个模型。' +
+      '（模型原文开头：' + s.slice(from, from + 80) + '…）',
+      0,
+    );
   }
 
   function normalizeDishes(parsed) {
@@ -80,12 +144,109 @@
     return out;
   }
 
+  /**
+   * 从服务商的错误体里把**它自己那句话**抠出来。
+   *
+   * 各家的格式五花八门，但都有一句给人看的说明，而且往往是中文的、最准的：
+   *   智谱   {"error":{"code":"1305","message":"该模型当前访问量过大，请您稍后再试"}}
+   *   OpenAI {"error":{"message":"...","type":"..."}}
+   *   有些网关直接给 {"message":"..."} 或 {"msg":"..."}
+   * 把这句话放在报错的最前面，比我自己编一句「请求太频繁」有用得多。
+   */
+  function providerMessage(bodyText) {
+    var s = String(bodyText || '').trim();
+    if (!s) return '';
+    try {
+      var j = JSON.parse(s);
+      var e = j && j.error;
+      var m = (e && (e.message || e.msg)) || j.message || j.msg || (j.error && typeof j.error === 'string' ? j.error : '');
+      var code = e && (e.code || e.type);
+      if (typeof m === 'string' && m) return code ? '「' + m + '」（' + code + '）' : '「' + m + '」';
+    } catch (err) { /* 不是 JSON，那就原样截一段 */ }
+    return s.slice(0, 200);
+  }
+
+  /** 是不是跑在安卓原生壳里（用于给出「这个环境下真的做得到」的建议） */
+  function isNativeShell() {
+    try {
+      var c = global.Capacitor;
+      return !!(c && ((c.isNativePlatform && c.isNativePlatform()) || c.isNative));
+    } catch (e) { return false; }
+  }
+
+  /**
+   * 请求真的发不出去（断网、跨域被拦、证书问题）时给的提示。
+   *
+   * 注意：分环境给建议。App 里「通过本地代理请求」是禁用的，
+   * 在这种环境下让用户去开那个开关等于把人指进死胡同。
+   */
+  function unreachableHint() {
+    if (isNativeShell()) {
+      return '连不上接口。检查一下手机的联网状态，或者换个网络（有些校园网会拦第三方接口）。';
+    }
+    if (global.location && global.location.protocol === 'file:') {
+      return '连不上接口。本地双击打开的单文件没有代理可用；' +
+        '换成 `npm run serve` 打开，并在设置里勾上「通过本地代理请求」，就能绕开浏览器跨域。';
+    }
+    return '连不上接口。浏览器可能把跨域请求拦了：用 `npm run serve` 打开，' +
+      '并在设置里勾上「通过本地代理请求」再试。';
+  }
+
+  /**
+   * 服务商返回了非 2xx 状态码时的提示。
+   *
+   * 这里的原则：**把服务商的原话放在最前面**，我自己的解释放后面。
+   * 像 1305「该模型当前访问量过大」这种，本身就是最准确的答案；
+   * 以前我在外面又套了一层「请求发不出去 / 浏览器跨域被拦」，方向完全是错的
+   * （都收到 HTTP 响应了，怎么可能是发不出去）。
+   */
+  /**
+   * 这个报错是不是「模型不收图片」。
+   *
+   * 纯文本模型遇到带 image_url 的消息，各家会在参数校验阶段拦下来，说法不同：
+   *   智谱   400 {"code":"1210","message":"messages.content.type 参数非法，取值范围 ['text']"}
+   *   OpenAI 400 "Invalid content type. Expected 'text'"
+   *   有些网关会说 "image_url is not supported" / "model does not support vision"
+   * 认出来之后要给一句人能看懂的结论：你选的不是视觉模型。
+   */
+  function looksLikeNoVision(bodyText) {
+    var s = String(bodyText || '');
+    return /messages\.content\.type|content\.type|image_url|image is not supported|does not support (vision|image)|multimodal|参数非法.*text|Expected 'text'/i.test(s);
+  }
+
   function friendlyError(status, bodyText) {
-    var detail = String(bodyText || '').slice(0, 220);
-    if (status === 401 || status === 403) return 'API Key 不对或没有权限（HTTP ' + status + '）：' + detail;
-    if (status === 404) return '接口地址或模型名不对（HTTP 404）：' + detail;
-    if (status === 429) return '请求太频繁 / 额度用完了（HTTP 429）：' + detail;
-    return '接口返回 HTTP ' + status + '：' + detail;
+    var said = providerMessage(bodyText);
+    var head = said ? said + '　' : '';
+
+    if ((status === 400 || status === 422) && looksLikeNoVision(bodyText)) {
+      return head + '（HTTP ' + status + '）这个模型**不收图片**，它不是视觉模型。' +
+        '拍照识别必须用支持图片输入的模型，比如智谱的 glm-4.6v-flash（免费）、' +
+        '硅基流动的 Qwen/Qwen3.5-4B，或百炼的 qwen3-vl-plus。' +
+        '去「设置」里换一个带 V 的模型名再试。';
+    }
+
+    if (status === 401 || status === 403) {
+      return head + '（HTTP ' + status + '）API Key 不对或没有权限。检查 Key 有没有复制全、有没有开通这个模型。';
+    }
+    if (status === 404) {
+      return head + '（HTTP 404）接口地址或模型名不对。检查 base URL 和模型名。';
+    }
+    if (status === 429) {
+      return head + '（HTTP 429）服务商在限流。' +
+        '免费的视觉模型（比如 glm-4.6v-flash）用的人多，很容易这样——' +
+        '等一两分钟再试，或者在设置里换个模型、换个服务商。';
+    }
+    if (status >= 500) {
+      return head + '（HTTP ' + status + '）服务商那边出错了，一般等一会儿会自己好。';
+    }
+    return head + '（HTTP ' + status + '）接口返回了错误。';
+  }
+
+  /** 带标记的错误：告诉后面的 catch「这是接口返回的错，别再当网络故障重新包装一遍」 */
+  function apiError(message, status) {
+    var e = new Error(message);
+    e.apiStatus = status || 0;
+    return e;
   }
 
   function postDirect(url, headers, payload, timeoutMs) {
@@ -99,25 +260,28 @@
     }).then(function (res) {
       return res.text().then(function (text) {
         clearTimeout(timer);
-        if (!res.ok) throw new Error(friendlyError(res.status, text));
+        if (!res.ok) throw apiError(friendlyError(res.status, text), res.status);
         return text;
       });
     }).catch(function (err) {
       clearTimeout(timer);
-      if (err && err.name === 'AbortError') throw new Error('请求超时（' + ((timeoutMs || 60000) / 1000) + ' 秒），网络太慢或图片太大');
-      if (err instanceof Error && /^接口返回|^API Key|^接口地址/.test(err.message)) throw err;
-      throw new Error('请求发不出去：' + (err && err.message ? err.message : err) +
-        '。常见原因是浏览器跨域（CORS）被拦——打开「设置 → 通过本地代理请求」，或用手机浏览器直接打开本页面重试。');
+      // 接口返回的错原样抛出，不要动它
+      if (err && err.apiStatus) throw err;
+      if (err && err.name === 'AbortError') {
+        throw apiError('请求超时（' + ((timeoutMs || 60000) / 1000) + ' 秒），网络太慢或图片太大', 0);
+      }
+      // 连响应都没拿到，才是真的发不出去
+      throw apiError(unreachableHint() + '（' + ((err && err.message) || err) + '）', 0);
     });
   }
 
   function readContent(text) {
     var json;
     try { json = JSON.parse(text); }
-    catch (e) { throw new Error('接口返回的不是 JSON：' + String(text).slice(0, 160)); }
-    if (json.error) throw new Error('接口报错：' + (json.error.message || JSON.stringify(json.error)).slice(0, 200));
+    catch (e) { throw apiError('接口返回的不是 JSON（可能是接口地址填成了普通网址）：' + String(text).slice(0, 120), 0); }
+    if (json.error) throw apiError('接口报错：' + providerMessage(text), 0);
     var choice = json.choices && json.choices[0];
-    if (!choice) throw new Error('接口没有返回 choices：' + String(text).slice(0, 160));
+    if (!choice) throw apiError('接口没有返回 choices：' + String(text).slice(0, 160), 0);
     var msg = choice.message || {};
     var content = msg.content;
     if (Array.isArray(content)) {
@@ -160,9 +324,7 @@
        *
        * 所以原生壳里必须无视这个开关（直连不受 CORS 限制，因为走的是原生网络栈）。
        */
-      var nativeShell = !!(global.Capacitor && (
-        (global.Capacitor.isNativePlatform && global.Capacitor.isNativePlatform()) || global.Capacitor.isNative
-      ));
+      var nativeShell = isNativeShell();
       var useProxy = !!v.useProxy && !nativeShell && global.location && global.location.protocol !== 'file:';
       if (useProxy) {
         return postDirect('/api/vision', { 'Content-Type': 'application/json' }, {
@@ -175,6 +337,34 @@
       }, payload, opts.timeoutMs).then(readContent);
     },
 
+    /**
+     * 带自动重试的调用。
+     *
+     * 只重试 429（限流）和 5xx（服务商临时抽风）——这两种等一下再来通常就好了，
+     * 而免费的视觉模型（glm-4.6v-flash 之类）被限流是家常便饭，
+     * 与其让用户自己反复点，不如自己等两秒再试一次。
+     * 401/404 这类重试多少次都一样，直接抛给用户。
+     */
+    callWithRetry: function (settings, messages, opts) {
+      opts = opts || {};
+      var tries = opts.retries === undefined ? 2 : opts.retries;
+      var onWait = opts.onWait;
+      var attempt = 0;
+
+      function run() {
+        attempt++;
+        return Vision.call(settings, messages, opts).catch(function (err) {
+          var st = (err && err.apiStatus) || 0;
+          var retryable = st === 429 || st >= 500;
+          if (!retryable || attempt > tries) throw err;
+          var waitMs = 1500 * attempt;   // 越往后等越久
+          if (onWait) onWait(attempt, waitMs);
+          return new Promise(function (resolve) { setTimeout(resolve, waitMs); }).then(run);
+        });
+      }
+      return run();
+    },
+
     /** 识别一张或多张图片（dataURL 数组） */
     recognize: function (settings, images, onProgress) {
       var content = [{ type: 'text', text: PROMPT }];
@@ -182,19 +372,59 @@
         content.push({ type: 'image_url', image_url: { url: url } });
       });
       if (onProgress) onProgress('正在识别…');
-      return Vision.call(settings, [{ role: 'user', content: content }], { timeoutMs: 90000 })
-        .then(function (r) {
-          var parsed = extractJson(r.content);
-          return { dishes: normalizeDishes(parsed), raw: r.content, usage: r.usage };
-        });
+      return Vision.callWithRetry(settings, [{ role: 'user', content: content }], {
+        timeoutMs: 90000,
+        // 给宽一点：菜牌上菜多的时候，20 条菜名加结构，1200 很容易被截断
+        maxTokens: 2000,
+        onWait: function (attempt) {
+          if (onProgress) onProgress('模型那边在排队（第 ' + attempt + ' 次重试）…');
+        },
+      }).then(function (r) {
+        var parsed = extractJson(r.content);
+        var salvaged = !!(parsed && parsed.__salvaged);
+        var dishes = normalizeDishes(parsed);
+        return {
+          dishes: dishes,
+          raw: r.content,
+          usage: r.usage,
+          // 输出被截断、只救回了一部分——要如实告诉用户，别让他以为就这些菜
+          salvaged: salvaged && dishes.length > 0,
+        };
+      });
     },
 
-    /** 测试连接：发一句纯文本，验证地址 / Key / 模型名是否可用 */
+    /**
+     * 测试连接。
+     *
+     * ⚠️ 必须带一张图片去测，不能只发纯文本。
+     *   这是踩过的坑：用户换了个纯文本模型，点「测试连接」显示正常，
+     *   一到拍照识别就报 400「messages.content.type 参数非法，取值范围 ['text']」——
+     *   因为纯文本模型也收得下纯文本，"测试通过"是假的。
+     *   这个接口存在的意义就是「能不能看图」，那就拿图去测。
+     *
+     * 用 1×1 的 PNG（一百来字节），几乎不耗额度，也不用等。
+     */
+    TEST_IMAGE: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+
     test: function (settings) {
-      return Vision.call(settings, [{ role: 'user', content: '回复两个字：收到' }], { maxTokens: 16, timeoutMs: 30000 })
-        .then(function (r) { return { ok: true, message: '连接正常，模型回复：' + r.content.trim().slice(0, 40) }; });
+      var content = [
+        { type: 'text', text: '这是一张 1×1 的测试图。只回复两个字：收到' },
+        { type: 'image_url', image_url: { url: Vision.TEST_IMAGE } },
+      ];
+      return Vision.callWithRetry(settings, [{ role: 'user', content: content }], {
+        maxTokens: 16, timeoutMs: 30000, retries: 1,
+      }).then(function (r) {
+        return { ok: true, message: '连接正常，而且这个模型能收图片。模型回复：' + r.content.trim().slice(0, 30) };
+      });
     },
   };
+
+  // 把错误处理也挂出来：这两条是纯函数，测试里要直接验
+  //（线上出过「明明收到了 HTTP 429，却提示用户去开跨域代理」的错，就是因为没人测这里）
+  Vision.providerMessage = providerMessage;
+  Vision.friendlyError = friendlyError;
+  Vision.unreachableHint = unreachableHint;
+  Vision.looksLikeNoVision = looksLikeNoVision;
 
   W.Vision = Vision;
 })(window);

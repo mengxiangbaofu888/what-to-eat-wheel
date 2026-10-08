@@ -654,7 +654,13 @@
           setStatus('这张照片里没认出菜品，换一张更清楚的菜牌试试～', 'err');
           return;
         }
-        setStatus('认出 ' + recognizedDishes.length + ' 道菜，确认一下再加进转盘：', 'ok');
+        if (res.salvaged) {
+          // 模型的输出被截断了，只救回来一部分。如实说，别让用户以为菜就这些。
+          setStatus('模型输出被截断了，只认出前 ' + recognizedDishes.length + ' 道（下面这些都是有效的）。' +
+            '想认全可以再拍一次，或者分两张图拍。', 'err');
+        } else {
+          setStatus('认出 ' + recognizedDishes.length + ' 道菜，确认一下再加进转盘：', 'ok');
+        }
         renderRecognized();
       })
       .catch(function (err) {
