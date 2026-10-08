@@ -792,6 +792,84 @@
     });
   }
 
+  /**
+   * 从剪贴板读 API Key 填进去。
+   *
+   * 为什么专门做个按钮：手机输入法在密码框上会禁掉粘贴（我们虽然改成了普通文本框，
+   * 但有些输入法还是会弹「安全键盘」），而 API Key 三四十个字符，
+   * 手敲一遍还容易敲错。点一下直接读剪贴板最省事。
+   * 读不到就退回到「请长按输入框粘贴」，并说明原因，不假装成功。
+   */
+  function pasteApiKey() {
+    function fallback(why) {
+      UI.toast('读不到剪贴板（' + why + '）。请长按输入框手动粘贴。', 'err', 5000);
+      els.setApiKey.focus();
+    }
+    var nav = global.navigator;
+    if (!nav || !nav.clipboard || !nav.clipboard.readText) {
+      fallback('这个环境不支持读取剪贴板');
+      return;
+    }
+    nav.clipboard.readText().then(function (text) {
+      var key = String(text || '').trim();
+      if (!key) { fallback('剪贴板是空的'); return; }
+      // 有时候复制到的是整行「API Key: sk-xxx」或者带引号，尽量把 Key 抠出来
+      var m = /(sk-[A-Za-z0-9_\-.]{8,}|[A-Za-z0-9]{8,}\.[A-Za-z0-9_\-.]{8,})/.exec(key);
+      els.setApiKey.value = m ? m[1] : key;
+      saveVisionFromUI();
+      UI.toast('已粘贴 ' + els.setApiKey.value.length + ' 个字符', 'ok');
+    }, function (err) {
+      fallback((err && err.message) || '被系统拒绝了');
+    });
+  }
+
+  /** 拉取服务商支持的模型列表，让用户直接挑，不用自己去控制台翻 */
+  function fetchModelList() {
+    saveVisionFromUI();
+    var v = S.settings.vision;
+    if (!v.apiKey) { UI.toast('先填 API Key，再拉模型列表', 'err'); return; }
+    if (!v.baseUrl) { UI.toast('先填接口地址', 'err'); return; }
+
+    els.btnModels.disabled = true;
+    els.btnModels.textContent = '拉取中…';
+
+    W.Vision.listModels(S.settings).then(function (list) {
+      var visionOnes = list.filter(function (m) { return m.vision; });
+      var items = list.slice(0, 60).map(function (m) {
+        return {
+          icon: m.vision ? '🖼' : '·',
+          text: m.id,
+          // 注意措辞：名字里看不出视觉标志，**不等于**它不能看图
+          //（比如 Qwen/Qwen3.5-4B 就没有标志）。所以标「未标注」而不是「纯文字」。
+          hint: m.vision ? '能看图' : '未标注',
+          value: m.id,
+        };
+      });
+      var title = '选一个模型（共 ' + list.length + ' 个'
+        + (visionOnes.length ? '，其中 ' + visionOnes.length + ' 个名字里带视觉标志' : '') + '）';
+      var lines = [];
+      if (visionOnes.length) {
+        lines.push('🖼 开头的是名字里明确带 v / vl / vision 的，拍照识别优先选这些，它们排在最前面。');
+      } else {
+        lines.push('⚠️ 这份列表里没有名字带视觉标志的模型。拍照识别要用能看图的模型，');
+        lines.push('   可以换个服务商，或者选一个之后用「测试连接」验一下（它会真的发张图试试）。');
+      }
+      lines.push('标「未标注」的不一定不能看图，只是名字里没写——拿不准就用「测试连接」验。');
+      if (list.length > 60) lines.push('（只列出前 60 个）');
+      return UI.sheet({ title: title, hint: lines.join('\n'), items: items });
+    }).then(function (picked) {
+      if (!picked) return;
+      els.setModel.value = picked;
+      saveVisionFromUI();
+      UI.toast('模型名已填：' + picked, 'ok', 2600);
+    }).catch(function (err) {
+      UI.toast((err && err.message) || String(err), 'err', 7000);
+    }).then(function () {
+      els.btnModels.disabled = false;
+      els.btnModels.textContent = '拉取';
+    });
+  }
+
   function testConnection() {
     saveVisionFromUI();
     var v = S.settings.vision;
@@ -945,9 +1023,11 @@
     els.providerHint = $('provider-hint');
     els.setBaseUrl = $('set-baseurl');
     els.setModel = $('set-model');
+    els.btnModels = $('btn-models');
     els.setApiKey = $('set-apikey');
     els.setProxy = $('set-proxy');
     els.btnEye = $('btn-eye');
+    els.btnPaste = $('btn-paste');
     els.btnTest = $('btn-test');
     els.btnSaveVision = $('btn-save-vision');
     els.setSound = $('set-sound');
@@ -1032,9 +1112,16 @@
       saveVisionFromUI();
       UI.toast(els.setProxy.checked ? '已开启本地代理' : '已关闭本地代理');
     });
+    // 显示/隐藏：现在用的是 CSS 遮蔽（不是 type=password），所以切换 class 就行。
+    // 之所以不用 type=password，是因为手机系统会把密码框当成真密码，
+    // 唤起安全键盘并禁掉粘贴，而 API Key 很长——那样只能一个字一个字敲。
     els.btnEye.addEventListener('click', function () {
-      els.setApiKey.type = els.setApiKey.type === 'password' ? 'text' : 'password';
+      var masked = els.setApiKey.classList.toggle('masked');
+      els.btnEye.textContent = masked ? '👁' : '🙈';
+      els.btnEye.title = masked ? '显示' : '隐藏';
     });
+    els.btnPaste.addEventListener('click', pasteApiKey);
+    els.btnModels.addEventListener('click', fetchModelList);
     els.btnTest.addEventListener('click', testConnection);
     els.btnSaveVision.addEventListener('click', function () { saveVisionFromUI(); UI.toast('已保存', 'ok'); });
 

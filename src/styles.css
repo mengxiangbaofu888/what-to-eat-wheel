@@ -331,6 +331,20 @@ body {
 }
 :root[data-theme='light'] .input { background: rgba(255, 255, 255, 0.8); }
 .input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.16); }
+
+/*
+ * API Key 的遮蔽显示。
+ *
+ * 这里**故意不用 `type="password"`**：手机系统（尤其国产 ROM）会把密码框当成真密码，
+ * 唤起「安全键盘」并禁掉粘贴，而 API Key 三四十个字符，只能一个字一个字敲，
+ * 体验非常糟。改成普通文本框 + 这行 CSS 遮蔽之后，输入法一切正常、能粘贴，
+ * 视觉上还是看不见的。
+ */
+.input.masked { -webkit-text-security: disc; text-security: disc; }
+/* 万一浏览器不支持 -webkit-text-security，至少别让 Key 明晃晃地摆在那儿 */
+@supports not (-webkit-text-security: disc) {
+  .input.masked { letter-spacing: 0.18em; }
+}
 select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 30px; }
 
 .btn {
@@ -355,7 +369,9 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
 .row { display: flex; gap: 8px; align-items: center; }
-.row > .input { flex: 1; }
+/* min-width:0 是必须的：不然输入框的默认最小宽度会把旁边的按钮顶出去（手机窄屏尤其明显） */
+.row > .input { flex: 1 1 auto; min-width: 0; }
+.row > .btn { flex: 0 0 auto; }
 .spacer { flex: 1; }
 .add-row { display: flex; gap: 8px; }
 .add-row .input { flex: 1; }
@@ -566,6 +582,19 @@ input[type='checkbox']:indeterminate::after {
 }
 .modal h3 { margin: 0 0 10px; font-size: 16px; }
 .modal p { margin: 0 0 10px; font-size: 13.5px; color: var(--text-dim); line-height: 1.65; }
+/* 标题下面那句说明（比如「拉取模型列表」里提示哪些能看图） */
+.modal-hint {
+  margin: -4px 0 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  background: var(--card);
+  border-radius: 8px;
+  padding: 7px 9px;
+  white-space: pre-wrap;
+}
+/* 模型列表可能有几十个，让它自己滚，别把整页顶开 */
+.sheet-list { max-height: 52vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .modal .field:last-child { margin-bottom: 0; }
 .modal ul { margin: 0 0 10px; padding-left: 18px; font-size: 13.5px; color: var(--text-dim); line-height: 1.75; }

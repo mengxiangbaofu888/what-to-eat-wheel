@@ -15,17 +15,17 @@
   var PROVIDERS = [
     {
       id: 'zhipu',
-      name: '智谱 AI · GLM-4.6V-Flash（免费）',
+      name: '智谱 AI · GLM（推荐，有免费视觉模型）',
       baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
       model: 'glm-4.6v-flash',
-      hint: '学生党首选：glm-4.6v-flash 目前完全免费，识别食堂菜牌够用。要更准可换 glm-5v-turbo / glm-4.6v。',
+      hint: '学生党首选：glm-4.6v-flash 目前完全免费，识别食堂菜牌够用。要更准可换 glm-4.6v / glm-5v-turbo。',
     },
     {
       id: 'siliconflow',
       name: '硅基流动 SiliconFlow（有免费模型）',
       baseUrl: 'https://api.siliconflow.cn/v1',
       model: 'Qwen/Qwen3.5-4B',
-      hint: 'Qwen/Qwen3.5-4B 免费且支持图片输入；模型名要写全，例如 Qwen/Qwen3.5-4B。',
+      hint: 'Qwen/Qwen3.5-4B 免费且支持图片输入。模型名要写全（带斜杠），点「拉取」能看到全部可用的。',
     },
     {
       id: 'dashscope',
@@ -39,7 +39,49 @@
       name: '火山方舟 · 豆包',
       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
       model: 'doubao-seed-1-6-vision-250815',
-      hint: '新用户每个模型 50 万 token。模型名通常要填控制台里的「接入点 ID」（ep-xxxxxxxx）或模型名。',
+      hint: '新用户每个模型 50 万 token。模型名可能要填控制台里的「接入点 ID」（ep-xxxxxxxx）或模型名。',
+    },
+    {
+      id: 'hunyuan',
+      name: '腾讯混元 Hunyuan',
+      baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
+      model: '',
+      hint: '腾讯云的混元大模型，有免费额度。视觉模型点「拉取」看，认准带 vision / vl 的。',
+    },
+    {
+      id: 'qianfan',
+      name: '百度千帆 · 文心一言',
+      baseUrl: 'https://qianfan.baidubce.com/v2',
+      model: '',
+      hint: '百度智能云千帆的 v2 接口（OpenAI 兼容）。新用户有免费额度。模型名点「拉取」选。',
+    },
+    {
+      id: 'spark',
+      name: '讯飞星火 Spark',
+      baseUrl: 'https://spark-api-open.xf-yun.com/v1',
+      model: '',
+      hint: '讯飞星火，有免费额度。注意讯飞要求模型名带后缀（如 generalv3.5），点「拉取」看准了再选。',
+    },
+    {
+      id: 'minimax',
+      name: 'MiniMax',
+      baseUrl: 'https://api.minimax.chat/v1',
+      model: '',
+      hint: 'MiniMax 的 abab 系列，有视觉模型。点「拉取」列出可用的。',
+    },
+    {
+      id: 'stepfun',
+      name: '阶跃星辰 StepFun',
+      baseUrl: 'https://api.stepfun.com/v1',
+      model: '',
+      hint: '阶跃星辰 step 系列，有视觉模型。点「拉取」列出可用的。',
+    },
+    {
+      id: 'modelscope',
+      name: '魔搭 ModelScope（免费推理）',
+      baseUrl: 'https://api-inference.modelscope.cn/v1',
+      model: '',
+      hint: '阿里达摩院的模型社区，绑定阿里云账号后可以免费调用一批开源模型。点「拉取」看有哪些。',
     },
     {
       id: 'moonshot',
@@ -47,6 +89,28 @@
       baseUrl: 'https://api.moonshot.cn/v1',
       model: 'kimi-k3',
       hint: '视觉模型 kimi-k3。注意 Kimi 只认 base64 图片，不接受公网图片链接——本应用正好就是传 base64，没问题。',
+    },
+    {
+      id: 'deepseek',
+      name: '深度求索 DeepSeek（目前没有视觉模型）',
+      baseUrl: 'https://api.deepseek.com/v1',
+      model: '',
+      hint: '⚠️ DeepSeek 目前的 API 只有文本模型，做不了看图识别。列在这里只是方便你确认——拍照识别请用上面带视觉模型的那几家。',
+    },
+    {
+      id: 'ollama',
+      name: '本地 Ollama（在自己电脑上跑）',
+      baseUrl: 'http://localhost:11434/v1',
+      model: '',
+      hint: '如果在自己电脑上跑了 Ollama，填这个地址就能用（比如 llava、qwen2.5-vl）。'
+        + '注意：手机上的 App 连不到你电脑的 localhost，这个只在电脑浏览器里打开时有用。',
+    },
+    {
+      id: 'lmstudio',
+      name: '本地 LM Studio（在自己电脑上跑）',
+      baseUrl: 'http://localhost:1234/v1',
+      model: '',
+      hint: 'LM Studio 启动本地服务器后的默认地址。同样只能在电脑上打开时用。',
     },
     {
       id: 'gemini',
@@ -67,7 +131,7 @@
       name: '自定义（任何 OpenAI 兼容接口）',
       baseUrl: '',
       model: '',
-      hint: '只要接口兼容 OpenAI 的 /chat/completions 且支持图片输入即可，本地跑的模型（Ollama / LM Studio 等）也能填。',
+      hint: '只要接口兼容 OpenAI 的 /chat/completions 且支持图片输入即可。模型名可以点「拉取」自动列出。',
     },
   ];
 

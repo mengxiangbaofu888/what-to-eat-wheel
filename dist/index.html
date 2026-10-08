@@ -341,6 +341,20 @@ body {
 }
 :root[data-theme='light'] .input { background: rgba(255, 255, 255, 0.8); }
 .input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.16); }
+
+/*
+ * API Key 的遮蔽显示。
+ *
+ * 这里**故意不用 `type="password"`**：手机系统（尤其国产 ROM）会把密码框当成真密码，
+ * 唤起「安全键盘」并禁掉粘贴，而 API Key 三四十个字符，只能一个字一个字敲，
+ * 体验非常糟。改成普通文本框 + 这行 CSS 遮蔽之后，输入法一切正常、能粘贴，
+ * 视觉上还是看不见的。
+ */
+.input.masked { -webkit-text-security: disc; text-security: disc; }
+/* 万一浏览器不支持 -webkit-text-security，至少别让 Key 明晃晃地摆在那儿 */
+@supports not (-webkit-text-security: disc) {
+  .input.masked { letter-spacing: 0.18em; }
+}
 select.input { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 30px; }
 
 .btn {
@@ -365,7 +379,9 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
 .row { display: flex; gap: 8px; align-items: center; }
-.row > .input { flex: 1; }
+/* min-width:0 是必须的：不然输入框的默认最小宽度会把旁边的按钮顶出去（手机窄屏尤其明显） */
+.row > .input { flex: 1 1 auto; min-width: 0; }
+.row > .btn { flex: 0 0 auto; }
 .spacer { flex: 1; }
 .add-row { display: flex; gap: 8px; }
 .add-row .input { flex: 1; }
@@ -576,6 +592,19 @@ input[type='checkbox']:indeterminate::after {
 }
 .modal h3 { margin: 0 0 10px; font-size: 16px; }
 .modal p { margin: 0 0 10px; font-size: 13.5px; color: var(--text-dim); line-height: 1.65; }
+/* 标题下面那句说明（比如「拉取模型列表」里提示哪些能看图） */
+.modal-hint {
+  margin: -4px 0 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  background: var(--card);
+  border-radius: 8px;
+  padding: 7px 9px;
+  white-space: pre-wrap;
+}
+/* 模型列表可能有几十个，让它自己滚，别把整页顶开 */
+.sheet-list { max-height: 52vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .modal .field:last-child { margin-bottom: 0; }
 .modal ul { margin: 0 0 10px; padding-left: 18px; font-size: 13.5px; color: var(--text-dim); line-height: 1.75; }
@@ -760,17 +789,30 @@ input[type='checkbox']:indeterminate::after {
         </div>
         <div class="field">
           <label class="label" for="set-model">模型名</label>
-          <input class="input" id="set-model" type="text" spellcheck="false" placeholder="glm-4.6v-flash">
+          <div class="row">
+            <input class="input" id="set-model" type="text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="glm-4.6v-flash">
+            <button class="btn ghost" id="btn-models" title="从服务商拉取可用的模型列表">拉取</button>
+          </div>
           <div class="hint warn-hint">⚠️ 必须是<b>能看图的模型</b>（名字里通常带 <code>v</code> / <code>vl</code> / <code>vision</code>）。
-            纯文字模型填进来会「测试通过」但一拍照就报错。</div>
+            纯文字模型填进来会「测试通过」但一拍照就报错。
+            <br>不知道填什么就点右边的「<b>拉取</b>」，它会列出这个 Key 能用的模型，能看图的排在最前面。</div>
         </div>
         <div class="field">
           <label class="label" for="set-apikey">API Key</label>
           <div class="row">
-            <input class="input" id="set-apikey" type="password" spellcheck="false" placeholder="sk-...">
+            <!--
+              注意：这里**不能**用 type="password"。
+              手机系统会把 password 输入框当成密码，唤起安全键盘并禁掉粘贴，
+              而 API Key 又长又难敲。改成普通文本框 + CSS 遮蔽（.masked），
+              输入法就正常了，长按粘贴能用，右边还额外给了一个「粘贴」按钮。
+            -->
+            <input class="input masked" id="set-apikey" type="text" spellcheck="false"
+                   autocapitalize="off" autocorrect="off" autocomplete="off" placeholder="sk-...">
+            <button class="btn ghost" id="btn-paste" title="从剪贴板粘贴">📋</button>
             <button class="btn ghost" id="btn-eye" title="显示/隐藏">👁</button>
           </div>
-          <div class="hint">Key 只存在你这台设备的本地存储里，不会上传到任何别的地方。</div>
+          <div class="hint">Key 只存在你这台设备的本地存储里，不会上传到任何别的地方。
+            手机输入法如果弹不出粘贴，点左边的 📋 直接从剪贴板读。</div>
         </div>
         <div class="field">
           <label class="check"><input type="checkbox" id="set-proxy"> <span>通过本地代理请求（推荐，用 <code>npm run serve</code> 打开时能彻底绕开浏览器跨域）</span></label>
@@ -1053,17 +1095,17 @@ input[type='checkbox']:indeterminate::after {
   var PROVIDERS = [
     {
       id: 'zhipu',
-      name: '智谱 AI · GLM-4.6V-Flash（免费）',
+      name: '智谱 AI · GLM（推荐，有免费视觉模型）',
       baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
       model: 'glm-4.6v-flash',
-      hint: '学生党首选：glm-4.6v-flash 目前完全免费，识别食堂菜牌够用。要更准可换 glm-5v-turbo / glm-4.6v。',
+      hint: '学生党首选：glm-4.6v-flash 目前完全免费，识别食堂菜牌够用。要更准可换 glm-4.6v / glm-5v-turbo。',
     },
     {
       id: 'siliconflow',
       name: '硅基流动 SiliconFlow（有免费模型）',
       baseUrl: 'https://api.siliconflow.cn/v1',
       model: 'Qwen/Qwen3.5-4B',
-      hint: 'Qwen/Qwen3.5-4B 免费且支持图片输入；模型名要写全，例如 Qwen/Qwen3.5-4B。',
+      hint: 'Qwen/Qwen3.5-4B 免费且支持图片输入。模型名要写全（带斜杠），点「拉取」能看到全部可用的。',
     },
     {
       id: 'dashscope',
@@ -1077,7 +1119,49 @@ input[type='checkbox']:indeterminate::after {
       name: '火山方舟 · 豆包',
       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
       model: 'doubao-seed-1-6-vision-250815',
-      hint: '新用户每个模型 50 万 token。模型名通常要填控制台里的「接入点 ID」（ep-xxxxxxxx）或模型名。',
+      hint: '新用户每个模型 50 万 token。模型名可能要填控制台里的「接入点 ID」（ep-xxxxxxxx）或模型名。',
+    },
+    {
+      id: 'hunyuan',
+      name: '腾讯混元 Hunyuan',
+      baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
+      model: '',
+      hint: '腾讯云的混元大模型，有免费额度。视觉模型点「拉取」看，认准带 vision / vl 的。',
+    },
+    {
+      id: 'qianfan',
+      name: '百度千帆 · 文心一言',
+      baseUrl: 'https://qianfan.baidubce.com/v2',
+      model: '',
+      hint: '百度智能云千帆的 v2 接口（OpenAI 兼容）。新用户有免费额度。模型名点「拉取」选。',
+    },
+    {
+      id: 'spark',
+      name: '讯飞星火 Spark',
+      baseUrl: 'https://spark-api-open.xf-yun.com/v1',
+      model: '',
+      hint: '讯飞星火，有免费额度。注意讯飞要求模型名带后缀（如 generalv3.5），点「拉取」看准了再选。',
+    },
+    {
+      id: 'minimax',
+      name: 'MiniMax',
+      baseUrl: 'https://api.minimax.chat/v1',
+      model: '',
+      hint: 'MiniMax 的 abab 系列，有视觉模型。点「拉取」列出可用的。',
+    },
+    {
+      id: 'stepfun',
+      name: '阶跃星辰 StepFun',
+      baseUrl: 'https://api.stepfun.com/v1',
+      model: '',
+      hint: '阶跃星辰 step 系列，有视觉模型。点「拉取」列出可用的。',
+    },
+    {
+      id: 'modelscope',
+      name: '魔搭 ModelScope（免费推理）',
+      baseUrl: 'https://api-inference.modelscope.cn/v1',
+      model: '',
+      hint: '阿里达摩院的模型社区，绑定阿里云账号后可以免费调用一批开源模型。点「拉取」看有哪些。',
     },
     {
       id: 'moonshot',
@@ -1085,6 +1169,28 @@ input[type='checkbox']:indeterminate::after {
       baseUrl: 'https://api.moonshot.cn/v1',
       model: 'kimi-k3',
       hint: '视觉模型 kimi-k3。注意 Kimi 只认 base64 图片，不接受公网图片链接——本应用正好就是传 base64，没问题。',
+    },
+    {
+      id: 'deepseek',
+      name: '深度求索 DeepSeek（目前没有视觉模型）',
+      baseUrl: 'https://api.deepseek.com/v1',
+      model: '',
+      hint: '⚠️ DeepSeek 目前的 API 只有文本模型，做不了看图识别。列在这里只是方便你确认——拍照识别请用上面带视觉模型的那几家。',
+    },
+    {
+      id: 'ollama',
+      name: '本地 Ollama（在自己电脑上跑）',
+      baseUrl: 'http://localhost:11434/v1',
+      model: '',
+      hint: '如果在自己电脑上跑了 Ollama，填这个地址就能用（比如 llava、qwen2.5-vl）。'
+        + '注意：手机上的 App 连不到你电脑的 localhost，这个只在电脑浏览器里打开时有用。',
+    },
+    {
+      id: 'lmstudio',
+      name: '本地 LM Studio（在自己电脑上跑）',
+      baseUrl: 'http://localhost:1234/v1',
+      model: '',
+      hint: 'LM Studio 启动本地服务器后的默认地址。同样只能在电脑上打开时用。',
     },
     {
       id: 'gemini',
@@ -1105,7 +1211,7 @@ input[type='checkbox']:indeterminate::after {
       name: '自定义（任何 OpenAI 兼容接口）',
       baseUrl: '',
       model: '',
-      hint: '只要接口兼容 OpenAI 的 /chat/completions 且支持图片输入即可，本地跑的模型（Ollama / LM Studio 等）也能填。',
+      hint: '只要接口兼容 OpenAI 的 /chat/completions 且支持图片输入即可。模型名可以点「拉取」自动列出。',
     },
   ];
 
@@ -2192,6 +2298,42 @@ input[type='checkbox']:indeterminate::after {
     return url + '/chat/completions';
   }
 
+  /** 把 base URL 变成 /models（拉模型列表用）；如果用户直接填了完整端点，就把尾巴削掉 */
+  function modelsEndpoint(baseUrl) {
+    var url = String(baseUrl || '').trim().replace(/\/+$/, '');
+    if (!url) throw new Error('还没有填接口地址');
+    url = url.replace(/\/chat\/completions$/, '');
+    return url + '/models';
+  }
+
+  /**
+   * 猜这个模型名能不能看图。
+   *
+   * 「拉取模型列表」拉回来的是一大串名字，绝大多数是纯文字模型，
+   * 用户根本分不清哪个能用来识别菜牌。按名字里的习惯叫法做个粗筛，
+   * 能看图的排前面并标出来——不保证 100% 准，但比让用户一个个试强得多。
+   */
+  function looksLikeVisionModel(id) {
+    var s = String(id || '').toLowerCase();
+
+    // 明确写着视觉的
+    if (/vision|multimodal|omni/.test(s)) return true;
+    // vl 作为独立词：qwen-vl-max、qwen3-vl-plus
+    if (/(^|[^a-z])vl([^a-z]|$)/.test(s)) return true;
+    // 数字后面紧跟 v：glm-4.6v-flash、glm-5v-turbo、glm-4v-flash
+    // 注意不能写成 v 加数字——那是版本号（moonshot-v1-8k 里的 v1 就不是 vision）
+    if (/\d\s*v(\d)?([-_./]|$)/.test(s)) return true;
+    if (/qwen\d*[-.]?vl/.test(s)) return true;
+    // 开源多模态的常见名字
+    if (/llava|internvl|minicpm-v|moondream|bakllava/.test(s)) return true;
+    // 闭源里大家都知道的
+    if (/gpt-[45]|gpt-4o/.test(s)) return true;
+    if (/gemini/.test(s)) return true;
+    if (/doubao.*(vision|seed)/.test(s)) return true;
+    if (/step-1v|abab.*vl|hunyuan.*vision/.test(s)) return true;
+    return false;
+  }
+
   /**
    * 扫描一段 JSON 文本，找出「完整元素」的结束位置。
    *
@@ -2410,6 +2552,42 @@ input[type='checkbox']:indeterminate::after {
     return head + '（HTTP ' + status + '）接口返回了错误。';
   }
 
+  /**
+   * 从 /models 的返回里把模型名抠出来。
+   *
+   * 标准 OpenAI 格式是 {"data":[{"id":"xxx"}]}，但实际见过好几种写法：
+   *   {"data":[{"id":"..."}]}        标准
+   *   {"models":[{"name":"..."}]}    有些网关
+   *   {"data":["模型名", ...]}        直接给字符串数组
+   *   直接就是一个数组
+   * 全试一遍，别因为格式差一点就报「没找到模型列表」。
+   */
+  function pickModelIds(text) {
+    var j;
+    try { j = JSON.parse(text); } catch (e) { return []; }
+
+    var list = null;
+    if (Array.isArray(j)) list = j;
+    else if (j && Array.isArray(j.data)) list = j.data;
+    else if (j && Array.isArray(j.models)) list = j.models;
+    else if (j && j.data && Array.isArray(j.data.models)) list = j.data.models;
+    else if (j && Array.isArray(j.result)) list = j.result;
+    if (!list) return [];
+
+    var out = [];
+    var seen = {};
+    list.forEach(function (item) {
+      var id = '';
+      if (typeof item === 'string') id = item;
+      else if (item && typeof item === 'object') id = item.id || item.name || item.model || item.model_name || '';
+      id = String(id || '').trim();
+      if (!id || seen[id]) return;
+      seen[id] = 1;
+      out.push(id);
+    });
+    return out;
+  }
+
   /** 带标记的错误：告诉后面的 catch「这是接口返回的错，别再当网络故障重新包装一遍」 */
   function apiError(message, status) {
     var e = new Error(message);
@@ -2562,6 +2740,51 @@ input[type='checkbox']:indeterminate::after {
     },
 
     /**
+     * 拉取这个 Key 能用的模型列表。
+     *
+     * 为什么要这个：让用户自己去找模型名太折腾了——各家控制台里的写法五花八门，
+     * 有的还要填带斜杠的全名（Qwen/Qwen3.5-4B）或者接入点 ID。
+     * 但几乎所有人都提供了 OpenAI 兼容的 GET /models，直接问它就行。
+     *
+     * 返回 [{ id, vision }]，能看图的排在前面。
+     */
+    listModels: function (settings, opts) {
+      opts = opts || {};
+      var v = (settings && settings.vision) || settings || {};
+      if (!v.apiKey) throw apiError('先填 API Key，再拉模型列表', 0);
+      var url = modelsEndpoint(v.baseUrl);
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, opts.timeoutMs || 25000);
+
+      return fetch(url, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + v.apiKey, Accept: 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+      }).then(function (res) {
+        return res.text().then(function (text) {
+          clearTimeout(timer);
+          if (!res.ok) throw apiError(friendlyError(res.status, text), res.status);
+          var ids = pickModelIds(text);
+          if (!ids.length) {
+            throw apiError('拉到了响应，但里面没找到模型列表。' +
+              '可能这家不提供 /models 接口，那就只能手动填模型名了。（返回内容开头：' + String(text).slice(0, 80) + '）', 0);
+          }
+          return ids
+            .map(function (id) { return { id: id, vision: looksLikeVisionModel(id) }; })
+            .sort(function (a, b) {
+              if (a.vision !== b.vision) return a.vision ? -1 : 1;   // 能看图的排前面
+              return a.id.localeCompare(b.id);
+            });
+        });
+      }).catch(function (err) {
+        clearTimeout(timer);
+        if (err && err.apiStatus) throw err;
+        if (err && err.name === 'AbortError') throw apiError('拉取模型列表超时了', 0);
+        throw apiError(unreachableHint() + '（' + ((err && err.message) || err) + '）', 0);
+      });
+    },
+
+    /**
      * 测试连接。
      *
      * ⚠️ 必须带一张图片去测，不能只发纯文本。
@@ -2593,6 +2816,9 @@ input[type='checkbox']:indeterminate::after {
   Vision.friendlyError = friendlyError;
   Vision.unreachableHint = unreachableHint;
   Vision.looksLikeNoVision = looksLikeNoVision;
+  Vision.looksLikeVisionModel = looksLikeVisionModel;
+  Vision.pickModelIds = pickModelIds;
+  Vision.modelsEndpoint = modelsEndpoint;
 
   W.Vision = Vision;
 })(window);
@@ -2661,6 +2887,9 @@ input[type='checkbox']:indeterminate::after {
     return new Promise(function (resolve) {
       U.clear(modalBox);
       if (opts.title) modalBox.appendChild(el('h3', { text: opts.title }));
+      // hint 是标题下面的一句说明。之前 sheet() 明明传了 hint，但这里没接，
+      // 于是「拉取模型列表」那些提示语全被丢掉了。
+      if (opts.hint) modalBox.appendChild(el('p', { class: 'modal-hint', text: opts.hint }));
       if (opts.body) modalBox.appendChild(typeof opts.body === 'string' ? el('p', { text: opts.body }) : opts.body);
       var actions = opts.actions || [{ text: '知道了', primary: true, value: 'ok' }];
       var row = el('div', { class: 'modal-actions' });
@@ -3690,6 +3919,84 @@ input[type='checkbox']:indeterminate::after {
     });
   }
 
+  /**
+   * 从剪贴板读 API Key 填进去。
+   *
+   * 为什么专门做个按钮：手机输入法在密码框上会禁掉粘贴（我们虽然改成了普通文本框，
+   * 但有些输入法还是会弹「安全键盘」），而 API Key 三四十个字符，
+   * 手敲一遍还容易敲错。点一下直接读剪贴板最省事。
+   * 读不到就退回到「请长按输入框粘贴」，并说明原因，不假装成功。
+   */
+  function pasteApiKey() {
+    function fallback(why) {
+      UI.toast('读不到剪贴板（' + why + '）。请长按输入框手动粘贴。', 'err', 5000);
+      els.setApiKey.focus();
+    }
+    var nav = global.navigator;
+    if (!nav || !nav.clipboard || !nav.clipboard.readText) {
+      fallback('这个环境不支持读取剪贴板');
+      return;
+    }
+    nav.clipboard.readText().then(function (text) {
+      var key = String(text || '').trim();
+      if (!key) { fallback('剪贴板是空的'); return; }
+      // 有时候复制到的是整行「API Key: sk-xxx」或者带引号，尽量把 Key 抠出来
+      var m = /(sk-[A-Za-z0-9_\-.]{8,}|[A-Za-z0-9]{8,}\.[A-Za-z0-9_\-.]{8,})/.exec(key);
+      els.setApiKey.value = m ? m[1] : key;
+      saveVisionFromUI();
+      UI.toast('已粘贴 ' + els.setApiKey.value.length + ' 个字符', 'ok');
+    }, function (err) {
+      fallback((err && err.message) || '被系统拒绝了');
+    });
+  }
+
+  /** 拉取服务商支持的模型列表，让用户直接挑，不用自己去控制台翻 */
+  function fetchModelList() {
+    saveVisionFromUI();
+    var v = S.settings.vision;
+    if (!v.apiKey) { UI.toast('先填 API Key，再拉模型列表', 'err'); return; }
+    if (!v.baseUrl) { UI.toast('先填接口地址', 'err'); return; }
+
+    els.btnModels.disabled = true;
+    els.btnModels.textContent = '拉取中…';
+
+    W.Vision.listModels(S.settings).then(function (list) {
+      var visionOnes = list.filter(function (m) { return m.vision; });
+      var items = list.slice(0, 60).map(function (m) {
+        return {
+          icon: m.vision ? '🖼' : '·',
+          text: m.id,
+          // 注意措辞：名字里看不出视觉标志，**不等于**它不能看图
+          //（比如 Qwen/Qwen3.5-4B 就没有标志）。所以标「未标注」而不是「纯文字」。
+          hint: m.vision ? '能看图' : '未标注',
+          value: m.id,
+        };
+      });
+      var title = '选一个模型（共 ' + list.length + ' 个'
+        + (visionOnes.length ? '，其中 ' + visionOnes.length + ' 个名字里带视觉标志' : '') + '）';
+      var lines = [];
+      if (visionOnes.length) {
+        lines.push('🖼 开头的是名字里明确带 v / vl / vision 的，拍照识别优先选这些，它们排在最前面。');
+      } else {
+        lines.push('⚠️ 这份列表里没有名字带视觉标志的模型。拍照识别要用能看图的模型，');
+        lines.push('   可以换个服务商，或者选一个之后用「测试连接」验一下（它会真的发张图试试）。');
+      }
+      lines.push('标「未标注」的不一定不能看图，只是名字里没写——拿不准就用「测试连接」验。');
+      if (list.length > 60) lines.push('（只列出前 60 个）');
+      return UI.sheet({ title: title, hint: lines.join('\n'), items: items });
+    }).then(function (picked) {
+      if (!picked) return;
+      els.setModel.value = picked;
+      saveVisionFromUI();
+      UI.toast('模型名已填：' + picked, 'ok', 2600);
+    }).catch(function (err) {
+      UI.toast((err && err.message) || String(err), 'err', 7000);
+    }).then(function () {
+      els.btnModels.disabled = false;
+      els.btnModels.textContent = '拉取';
+    });
+  }
+
   function testConnection() {
     saveVisionFromUI();
     var v = S.settings.vision;
@@ -3843,9 +4150,11 @@ input[type='checkbox']:indeterminate::after {
     els.providerHint = $('provider-hint');
     els.setBaseUrl = $('set-baseurl');
     els.setModel = $('set-model');
+    els.btnModels = $('btn-models');
     els.setApiKey = $('set-apikey');
     els.setProxy = $('set-proxy');
     els.btnEye = $('btn-eye');
+    els.btnPaste = $('btn-paste');
     els.btnTest = $('btn-test');
     els.btnSaveVision = $('btn-save-vision');
     els.setSound = $('set-sound');
@@ -3930,9 +4239,16 @@ input[type='checkbox']:indeterminate::after {
       saveVisionFromUI();
       UI.toast(els.setProxy.checked ? '已开启本地代理' : '已关闭本地代理');
     });
+    // 显示/隐藏：现在用的是 CSS 遮蔽（不是 type=password），所以切换 class 就行。
+    // 之所以不用 type=password，是因为手机系统会把密码框当成真密码，
+    // 唤起安全键盘并禁掉粘贴，而 API Key 很长——那样只能一个字一个字敲。
     els.btnEye.addEventListener('click', function () {
-      els.setApiKey.type = els.setApiKey.type === 'password' ? 'text' : 'password';
+      var masked = els.setApiKey.classList.toggle('masked');
+      els.btnEye.textContent = masked ? '👁' : '🙈';
+      els.btnEye.title = masked ? '显示' : '隐藏';
     });
+    els.btnPaste.addEventListener('click', pasteApiKey);
+    els.btnModels.addEventListener('click', fetchModelList);
     els.btnTest.addEventListener('click', testConnection);
     els.btnSaveVision.addEventListener('click', function () { saveVisionFromUI(); UI.toast('已保存', 'ok'); });
 

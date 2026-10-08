@@ -61,6 +61,9 @@
     return new Promise(function (resolve) {
       U.clear(modalBox);
       if (opts.title) modalBox.appendChild(el('h3', { text: opts.title }));
+      // hint 是标题下面的一句说明。之前 sheet() 明明传了 hint，但这里没接，
+      // 于是「拉取模型列表」那些提示语全被丢掉了。
+      if (opts.hint) modalBox.appendChild(el('p', { class: 'modal-hint', text: opts.hint }));
       if (opts.body) modalBox.appendChild(typeof opts.body === 'string' ? el('p', { text: opts.body }) : opts.body);
       var actions = opts.actions || [{ text: '知道了', primary: true, value: 'ok' }];
       var row = el('div', { class: 'modal-actions' });

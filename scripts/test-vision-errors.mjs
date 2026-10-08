@@ -150,9 +150,50 @@ check('模型没给 JSON 时给中文提示',
 check('```json 代码块能剥掉',
   V.extractJson('```json\n{"dishes":[{"name":"红烧肉"}]}\n```').dishes[0].name === '红烧肉');
 
+/* ---------- 拉取模型列表：解析 + 视觉模型识别 ---------- */
+
+console.log('\n6) 拉取模型列表');
+
+// 各家 /models 的返回格式不一样，都得能认
+const fmtStd = '{"object":"list","data":[{"id":"glm-4.6v-flash"},{"id":"glm-4.6"}]}';
+check('标准 OpenAI 格式', JSON.stringify(V.pickModelIds(fmtStd)) === '["glm-4.6v-flash","glm-4.6"]', JSON.stringify(V.pickModelIds(fmtStd)));
+check('models[] + name 字段',
+  V.pickModelIds('{"models":[{"name":"qwen3-vl-plus"},{"name":"qwen3-max"}]}').length === 2,
+  JSON.stringify(V.pickModelIds('{"models":[{"name":"qwen3-vl-plus"},{"name":"qwen3-max"}]}')));
+check('直接是字符串数组', JSON.stringify(V.pickModelIds('["a","b"]')) === '["a","b"]', JSON.stringify(V.pickModelIds('["a","b"]')));
+check('裸数组 + 对象混合', V.pickModelIds('{"data":[{"id":"x"},"y"]}').join(',') === 'x,y', V.pickModelIds('{"data":[{"id":"x"},"y"]}').join(','));
+check('去重', V.pickModelIds('{"data":[{"id":"a"},{"id":"a"}]}').length === 1);
+check('非 JSON 返回空数组不抛错', Array.isArray(V.pickModelIds('<html>404</html>')) && V.pickModelIds('<html>404</html>').length === 0);
+
+// 能不能看出「这个模型或许能看图」——这决定了用户会不会挑错
+console.log('\n  视觉模型识别：');
+const visionIds = ['glm-4.6v-flash', 'glm-5v-turbo', 'qwen3-vl-plus', 'gpt-4o', 'gemini-3.8-flash', 'llava:13b', 'internvl2', 'doubao-seed-1-6-vision-250815'];
+const textIds = ['glm-4.6', 'qwen3-max', 'deepseek-chat', 'text-embedding-3-small', 'gpt-3.5-turbo-instruct'];
+// 名字里看不出标志的：既不能断言能看图，也不该说人家是纯文字模型
+const unknownIds = ['Qwen/Qwen3.5-4B', 'moonshot-v1-8k'];
+visionIds.forEach((id) => {
+  check(`  ${id} → 能看图`, V.looksLikeVisionModel(id) === true, String(V.looksLikeVisionModel(id)));
+});
+textIds.forEach((id) => {
+  check(`  ${id} → 看不出视觉标志`, V.looksLikeVisionModel(id) === false, String(V.looksLikeVisionModel(id)));
+});
+unknownIds.forEach((id) => {
+  check(`  ${id} → 不误判（名字里没标志就如实说看不出）`, V.looksLikeVisionModel(id) === false, String(V.looksLikeVisionModel(id)));
+});
+// 措辞层面的检查：界面不能把「看不出标志」说成「纯文字」
+const appSrc = readFileSync(join(SRC, 'app.js'), 'utf8');
+check('界面措辞不说「纯文字」（会误导用户错过好模型）', !has(appSrc, "'纯文字'"), '又写回「纯文字」了');
+check('界面措辞用「未标注」', has(appSrc, '未标注'), '没找到「未标注」');
+
+// 端点的拼法
+check('baseUrl → /models', V.modelsEndpoint('https://api.siliconflow.cn/v1') === 'https://api.siliconflow.cn/v1/models', V.modelsEndpoint('https://api.siliconflow.cn/v1'));
+check('填了完整端点也能削回来',
+  V.modelsEndpoint('https://x.com/v1/chat/completions') === 'https://x.com/v1/models',
+  V.modelsEndpoint('https://x.com/v1/chat/completions'));
+
 /* ---------- 源码层面的老毛病别再回来 ---------- */
 
-console.log('\n6) 源码回归检查');
+console.log('\n7) 源码回归检查');
 // 之前这里写错过一次：拿「return JSON.parse(...)」这个字符串本身当判据，
 // 结果那行明明在 try 里也被判成裸调用。改成检查它前面有没有 try。
 const bareParse = [...src.matchAll(/^.*JSON\.parse\(.*$/gm)].filter((m) => {

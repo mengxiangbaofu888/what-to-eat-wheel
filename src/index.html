@@ -131,17 +131,30 @@
         </div>
         <div class="field">
           <label class="label" for="set-model">模型名</label>
-          <input class="input" id="set-model" type="text" spellcheck="false" placeholder="glm-4.6v-flash">
+          <div class="row">
+            <input class="input" id="set-model" type="text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="glm-4.6v-flash">
+            <button class="btn ghost" id="btn-models" title="从服务商拉取可用的模型列表">拉取</button>
+          </div>
           <div class="hint warn-hint">⚠️ 必须是<b>能看图的模型</b>（名字里通常带 <code>v</code> / <code>vl</code> / <code>vision</code>）。
-            纯文字模型填进来会「测试通过」但一拍照就报错。</div>
+            纯文字模型填进来会「测试通过」但一拍照就报错。
+            <br>不知道填什么就点右边的「<b>拉取</b>」，它会列出这个 Key 能用的模型，能看图的排在最前面。</div>
         </div>
         <div class="field">
           <label class="label" for="set-apikey">API Key</label>
           <div class="row">
-            <input class="input" id="set-apikey" type="password" spellcheck="false" placeholder="sk-...">
+            <!--
+              注意：这里**不能**用 type="password"。
+              手机系统会把 password 输入框当成密码，唤起安全键盘并禁掉粘贴，
+              而 API Key 又长又难敲。改成普通文本框 + CSS 遮蔽（.masked），
+              输入法就正常了，长按粘贴能用，右边还额外给了一个「粘贴」按钮。
+            -->
+            <input class="input masked" id="set-apikey" type="text" spellcheck="false"
+                   autocapitalize="off" autocorrect="off" autocomplete="off" placeholder="sk-...">
+            <button class="btn ghost" id="btn-paste" title="从剪贴板粘贴">📋</button>
             <button class="btn ghost" id="btn-eye" title="显示/隐藏">👁</button>
           </div>
-          <div class="hint">Key 只存在你这台设备的本地存储里，不会上传到任何别的地方。</div>
+          <div class="hint">Key 只存在你这台设备的本地存储里，不会上传到任何别的地方。
+            手机输入法如果弹不出粘贴，点左边的 📋 直接从剪贴板读。</div>
         </div>
         <div class="field">
           <label class="check"><input type="checkbox" id="set-proxy"> <span>通过本地代理请求（推荐，用 <code>npm run serve</code> 打开时能彻底绕开浏览器跨域）</span></label>

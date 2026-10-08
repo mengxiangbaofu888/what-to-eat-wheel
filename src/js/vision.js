@@ -24,6 +24,42 @@
     return url + '/chat/completions';
   }
 
+  /** 把 base URL 变成 /models（拉模型列表用）；如果用户直接填了完整端点，就把尾巴削掉 */
+  function modelsEndpoint(baseUrl) {
+    var url = String(baseUrl || '').trim().replace(/\/+$/, '');
+    if (!url) throw new Error('还没有填接口地址');
+    url = url.replace(/\/chat\/completions$/, '');
+    return url + '/models';
+  }
+
+  /**
+   * 猜这个模型名能不能看图。
+   *
+   * 「拉取模型列表」拉回来的是一大串名字，绝大多数是纯文字模型，
+   * 用户根本分不清哪个能用来识别菜牌。按名字里的习惯叫法做个粗筛，
+   * 能看图的排前面并标出来——不保证 100% 准，但比让用户一个个试强得多。
+   */
+  function looksLikeVisionModel(id) {
+    var s = String(id || '').toLowerCase();
+
+    // 明确写着视觉的
+    if (/vision|multimodal|omni/.test(s)) return true;
+    // vl 作为独立词：qwen-vl-max、qwen3-vl-plus
+    if (/(^|[^a-z])vl([^a-z]|$)/.test(s)) return true;
+    // 数字后面紧跟 v：glm-4.6v-flash、glm-5v-turbo、glm-4v-flash
+    // 注意不能写成 v 加数字——那是版本号（moonshot-v1-8k 里的 v1 就不是 vision）
+    if (/\d\s*v(\d)?([-_./]|$)/.test(s)) return true;
+    if (/qwen\d*[-.]?vl/.test(s)) return true;
+    // 开源多模态的常见名字
+    if (/llava|internvl|minicpm-v|moondream|bakllava/.test(s)) return true;
+    // 闭源里大家都知道的
+    if (/gpt-[45]|gpt-4o/.test(s)) return true;
+    if (/gemini/.test(s)) return true;
+    if (/doubao.*(vision|seed)/.test(s)) return true;
+    if (/step-1v|abab.*vl|hunyuan.*vision/.test(s)) return true;
+    return false;
+  }
+
   /**
    * 扫描一段 JSON 文本，找出「完整元素」的结束位置。
    *
@@ -242,6 +278,42 @@
     return head + '（HTTP ' + status + '）接口返回了错误。';
   }
 
+  /**
+   * 从 /models 的返回里把模型名抠出来。
+   *
+   * 标准 OpenAI 格式是 {"data":[{"id":"xxx"}]}，但实际见过好几种写法：
+   *   {"data":[{"id":"..."}]}        标准
+   *   {"models":[{"name":"..."}]}    有些网关
+   *   {"data":["模型名", ...]}        直接给字符串数组
+   *   直接就是一个数组
+   * 全试一遍，别因为格式差一点就报「没找到模型列表」。
+   */
+  function pickModelIds(text) {
+    var j;
+    try { j = JSON.parse(text); } catch (e) { return []; }
+
+    var list = null;
+    if (Array.isArray(j)) list = j;
+    else if (j && Array.isArray(j.data)) list = j.data;
+    else if (j && Array.isArray(j.models)) list = j.models;
+    else if (j && j.data && Array.isArray(j.data.models)) list = j.data.models;
+    else if (j && Array.isArray(j.result)) list = j.result;
+    if (!list) return [];
+
+    var out = [];
+    var seen = {};
+    list.forEach(function (item) {
+      var id = '';
+      if (typeof item === 'string') id = item;
+      else if (item && typeof item === 'object') id = item.id || item.name || item.model || item.model_name || '';
+      id = String(id || '').trim();
+      if (!id || seen[id]) return;
+      seen[id] = 1;
+      out.push(id);
+    });
+    return out;
+  }
+
   /** 带标记的错误：告诉后面的 catch「这是接口返回的错，别再当网络故障重新包装一遍」 */
   function apiError(message, status) {
     var e = new Error(message);
@@ -394,6 +466,51 @@
     },
 
     /**
+     * 拉取这个 Key 能用的模型列表。
+     *
+     * 为什么要这个：让用户自己去找模型名太折腾了——各家控制台里的写法五花八门，
+     * 有的还要填带斜杠的全名（Qwen/Qwen3.5-4B）或者接入点 ID。
+     * 但几乎所有人都提供了 OpenAI 兼容的 GET /models，直接问它就行。
+     *
+     * 返回 [{ id, vision }]，能看图的排在前面。
+     */
+    listModels: function (settings, opts) {
+      opts = opts || {};
+      var v = (settings && settings.vision) || settings || {};
+      if (!v.apiKey) throw apiError('先填 API Key，再拉模型列表', 0);
+      var url = modelsEndpoint(v.baseUrl);
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, opts.timeoutMs || 25000);
+
+      return fetch(url, {
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + v.apiKey, Accept: 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+      }).then(function (res) {
+        return res.text().then(function (text) {
+          clearTimeout(timer);
+          if (!res.ok) throw apiError(friendlyError(res.status, text), res.status);
+          var ids = pickModelIds(text);
+          if (!ids.length) {
+            throw apiError('拉到了响应，但里面没找到模型列表。' +
+              '可能这家不提供 /models 接口，那就只能手动填模型名了。（返回内容开头：' + String(text).slice(0, 80) + '）', 0);
+          }
+          return ids
+            .map(function (id) { return { id: id, vision: looksLikeVisionModel(id) }; })
+            .sort(function (a, b) {
+              if (a.vision !== b.vision) return a.vision ? -1 : 1;   // 能看图的排前面
+              return a.id.localeCompare(b.id);
+            });
+        });
+      }).catch(function (err) {
+        clearTimeout(timer);
+        if (err && err.apiStatus) throw err;
+        if (err && err.name === 'AbortError') throw apiError('拉取模型列表超时了', 0);
+        throw apiError(unreachableHint() + '（' + ((err && err.message) || err) + '）', 0);
+      });
+    },
+
+    /**
      * 测试连接。
      *
      * ⚠️ 必须带一张图片去测，不能只发纯文本。
@@ -425,6 +542,9 @@
   Vision.friendlyError = friendlyError;
   Vision.unreachableHint = unreachableHint;
   Vision.looksLikeNoVision = looksLikeNoVision;
+  Vision.looksLikeVisionModel = looksLikeVisionModel;
+  Vision.pickModelIds = pickModelIds;
+  Vision.modelsEndpoint = modelsEndpoint;
 
   W.Vision = Vision;
 })(window);
