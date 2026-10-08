@@ -343,12 +343,21 @@ else {
 
 /** 找到某个大类那一组的 ⋯ 按钮 */
 function groupMenuFor(catName) {
-  const groups = $$('#cat-list .cat-group');
-  for (const grp of groups) {
+  const grp = groupElFor(catName);
+  return grp ? grp.querySelector('.cat-head button.mini') : null;
+}
+
+/** 找到某个大类那一组的「整体」按钮 */
+function oneBtnFor(catName) {
+  const grp = groupElFor(catName);
+  return grp ? grp.querySelector('.one-btn') : null;
+}
+
+/** 按大类名找到它那一组 */
+function groupElFor(catName) {
+  for (const grp of $$('#cat-list .cat-group')) {
     const nameEl = grp.querySelector('.cat-name');
-    if (nameEl && nameEl.textContent.trim() === catName) {
-      return grp.querySelector('.cat-head button.mini');
-    }
+    if (nameEl && nameEl.textContent.trim() === catName) return grp;
   }
   return null;
 }
@@ -390,6 +399,8 @@ else ok('删除大类', '大类解散，' + orphan.length + ' 道菜回到未分
 const oneCat = S.addCategory('整体测试类', true);
 const oneA = S.addItem('整体测试菜甲', oneCat.id, true);
 const oneB = S.addItem('整体测试菜乙', oneCat.id, true);
+// 先把所有大类的「整体」关掉，免得前面别的操作留下的状态干扰这一段的断言
+S.data.categories.forEach((c) => { c.groupAsOne = false; c.enabled = true; });
 S.setAllEnabled(false);
 S.save(true); S.emit();
 await wait(30);
@@ -414,14 +425,38 @@ opts = S.wheelOptions();
 if (opts.length !== 1) bad('整体上盘时不展开菜品', `期望仍然只有 1 项，实际 ${opts.length} 项：${opts.map((o) => o.name).join('、')}`);
 else ok('整体上盘时不展开菜品', '两道菜勾上了也不占扇区');
 
-// 界面上应该出现「整体」标记，菜品行变成不可勾选
-if (!$('#cat-list .cat-tag')) bad('界面上有「整体」标记', '找不到 .cat-tag');
-else ok('界面上有「整体」标记', $('.cat-tag').textContent);
+// 界面上应该出现「整体」按钮（启用态），菜品行变成不可勾选
+const oneBtn = $('#cat-list .one-btn.on');
+if (!oneBtn) bad('界面上有「整体」按钮且是启用态', '找不到 .one-btn.on');
+else ok('界面上有「整体」按钮且是启用态', oneBtn.textContent.trim());
 
 const groupedRows = $$('#cat-list .cat-item.grouped');
 if (groupedRows.length !== 2) bad('整体模式下的菜品行有标记', `期望 2 行，实际 ${groupedRows.length}`);
 else if (!groupedRows[0].querySelector('input').disabled) bad('整体模式下的菜品复选框该禁用', '还能点');
 else ok('整体模式下的菜品复选框被禁用');
+
+/* ---- 最关键的一条：点一下「整体」按钮，一步就把大类放进转盘 ---- */
+
+S.setAllEnabled(false);
+S.setCategoryMode(oneCat.id, false);   // 退回按菜品，模拟用户还没设置过
+await wait(40);
+if (S.wheelOptions().length !== 0) {
+  bad('准备：转盘清空', `还剩 ${S.wheelOptions().length} 项`);
+} else {
+  const offBtn = oneBtnFor('整体测试类');
+  if (!offBtn) bad('未启用时「整体」按钮也在（灰色）', '在「整体测试类」那一组里没找到未启用的 .one-btn');
+  else if (offBtn.classList.contains('on')) bad('未启用时「整体」按钮也在（灰色）', '按钮已经是启用态了');
+  else {
+    click(offBtn);
+    await wait(60);
+    const o = S.wheelOptions();
+    if (o.length !== 1 || o[0].kind !== 'category' || o[0].name !== '整体测试类') {
+      bad('点一下「整体」按钮就该一步上盘', `${o.length} 项：${o.map((x) => x.name + '/' + x.kind).join('、') || '空的'}`);
+    } else {
+      ok('点一下「整体」按钮就该一步上盘', o[0].name + ' 占一个位置');
+    }
+  }
+}
 
 // 撤销这一类
 S.setCategoryEnabled(oneCat.id, false);
@@ -429,8 +464,9 @@ await wait(30);
 if (S.wheelOptions().length !== 0) bad('整体模式也能撤下这一类', `还剩 ${S.wheelOptions().length} 项`);
 else ok('整体模式也能撤下这一类');
 
-// 切回「按菜品」，勾中的两道菜应该重新各自占一个扇区
+// 切回「按菜品」：把两道菜勾上，它们应该重新各自占一个位置
 S.setCategoryMode(oneCat.id, false);
+S.setManyEnabled([oneA.id, oneB.id], true);
 await wait(30);
 opts = S.wheelOptions();
 if (opts.length !== 2 || opts.some((o) => o.kind !== 'item')) {
@@ -479,6 +515,24 @@ await wait(250);
 const nativeHtml = nativeDom.window.document.documentElement;
 if (!nativeHtml.classList.contains('is-native')) bad('原生壳里会给 html 加 is-native', 'class 没加上，顶栏还是会被状态栏压住');
 else ok('原生壳里会给 html 加 is-native');
+
+/*
+ * 原生壳里「通过本地代理请求」必须被禁用。
+ * 线上出过这个 bug：App 里勾上它之后，请求发到相对路径 /api/vision，
+ * 落到 Capacitor 自己的静态服务器上被当成网页返回，
+ * 用户看到的报错是「接口返回的不是 JSON: <!doctype html> … viewport-fit=cover …」
+ * ——那串 HTML 其实就是应用自己的首页。
+ */
+const nativeProxy = nativeDom.window.document.querySelector('#set-proxy');
+if (!nativeProxy) bad('原生壳里找得到代理开关', '找不到 #set-proxy');
+else if (!nativeProxy.disabled) bad('原生壳里必须禁用「通过本地代理请求」', '还能勾上，勾了识别就会拿到一张 HTML');
+else ok('原生壳里必须禁用「通过本地代理请求」');
+
+// 而且就算配置里残留了 useProxy，调用时也要无视它（这里直接验 vision.js 的判断）
+const visionSrc = html.slice(html.indexOf('/* ===== vision.js ===== */'), html.indexOf('/* ===== ui.js ===== */'));
+if (!/nativeShell/.test(visionSrc)) bad('vision.js 要认得原生壳并忽略代理', '找不到 nativeShell 判断');
+else ok('vision.js 要认得原生壳并忽略代理');
+
 nativeDom.window.close();
 
 /* ---------------- 结果 ---------------- */

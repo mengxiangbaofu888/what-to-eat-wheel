@@ -448,6 +448,30 @@
       save(); emit();
     },
 
+    /**
+     * 一步到位：把这个大类切成「整体」并立刻放进转盘。
+     *
+     * 单独给一个方法，是因为「先切模式、再勾上盘」是两步，
+     * 而用户点「整体」按钮时想要的是一步就看到转盘上多了一个位置。
+     */
+    enterCategoryAsOne: function (catId) {
+      var cat = api.findCategory(catId);
+      if (!cat) return;
+      cat.groupAsOne = true;
+      cat.enabled = true;
+      save(); emit();
+    },
+
+    /** 批量勾选这些菜品；把它们所属的大类退出「整体」模式，否则它们不会生效 */
+    setManyEntries: function (ids, catId, on) {
+      var cat = catId ? api.findCategory(catId) : null;
+      if (cat && cat.groupAsOne && on) cat.groupAsOne = false;
+      var set = {};
+      (ids || []).forEach(function (id) { set[id] = 1; });
+      data.items.forEach(function (i) { if (set[i.id]) i.enabled = !!on; });
+      save(); emit();
+    },
+
     /** 整体模式下，这个大类要不要上盘 */
     setCategoryEnabled: function (catId, on) {
       var cat = api.findCategory(catId);

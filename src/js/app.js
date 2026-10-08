@@ -18,6 +18,14 @@
 
   function $(id) { return document.getElementById(id); }
 
+  /** 是不是跑在安卓原生壳（Capacitor）里 */
+  function isNativeShell() {
+    try {
+      var c = global.Capacitor;
+      return !!(c && ((c.isNativePlatform && c.isNativePlatform()) || c.isNative));
+    } catch (e) { return false; }
+  }
+
   /* ============================== 主题 ============================== */
 
   var media = global.matchMedia ? global.matchMedia('(prefers-color-scheme: light)') : null;
@@ -70,15 +78,48 @@
       var onCount = g.items.filter(function (i) { return i.enabled; }).length;
       var allOn = g.items.length > 0 && onCount === g.items.length;
       var someOn = onCount > 0 && !allOn;
-      var asOne = !!g.groupAsOne;   // 整个大类只上一个扇区
+      var asOne = !!g.groupAsOne;           // 这个大类是不是「整体占一个位置」
+      var oneOn = asOne && g.enabled !== false;
 
-      var headBox = el('input', { type: 'checkbox', checked: asOne ? g.enabled !== false : allOn });
+      var headBox = el('input', { type: 'checkbox', checked: asOne ? oneOn : allOn });
       headBox.indeterminate = asOne ? false : someOn;
       headBox.addEventListener('click', function (e) {
         e.stopPropagation();
-        if (asOne) S.setCategoryEnabled(g.id, g.enabled === false);   // 整体模式：只管这一类上不上
-        else S.setManyEnabled(g.items.map(function (i) { return i.id; }), !allOn);
+        if (asOne) S.setCategoryEnabled(g.id, !oneOn);
+        else S.setManyEntries(g.items.map(function (i) { return i.id; }), g.id, !allOn);
       });
+
+      /*
+       * 「整体」按钮：点一下就**直接把整个大类放进转盘**，占一个位置。
+       *
+       * 之前这个操作藏在 ⋯ 菜单里（先切模式、再勾复选框，两步），用户找不到也说太绕。
+       * 现在它是一个一直可见的胶囊按钮：
+       *   没启用 → 灰色描边「整体」    点一下 = 这一类整体进转盘
+       *   已启用 → 绿色实心「整体 ✓」  点一下 = 从转盘撤下
+       * 一件事一步到位，状态也一眼能看出来。
+       */
+      var oneBtn = null;
+      if (!g.virtual) {
+        oneBtn = el('button', {
+          class: 'one-btn' + (oneOn ? ' on' : ''),
+          title: oneOn
+            ? '「' + g.name + '」整个在转盘上占一个位置，点一下撤下'
+            : '把「' + g.name + '」整个加进转盘，只占一个位置（下面的菜不单独出现）',
+          onclick: function (e) {
+            e.stopPropagation();
+            if (oneOn) {
+              S.setCategoryMode(g.id, false);       // 退出整体上盘，回到按菜品
+              UI.toast('「' + g.name + '」已从转盘撤下', 'ok');
+            } else {
+              S.enterCategoryAsOne(g.id);           // 一步：切成整体 + 上盘
+              UI.toast('「' + g.name + '」整个加进转盘了，占一个位置', 'ok', 3000);
+            }
+          },
+        }, [
+          el('span', { class: 'one-btn-icon', text: oneOn ? '✓' : '＋' }),
+          el('span', { text: '整体' }),
+        ]);
+      }
 
       var head = el('div', { class: 'cat-head', onclick: function (e) {
         if (e.target.closest('button') || e.target === headBox) return;
@@ -86,7 +127,7 @@
       } }, [
         headBox,
         el('span', { class: 'cat-name', text: g.name }),
-        asOne ? el('span', { class: 'cat-tag', text: '整体', title: '整个大类在转盘上只占一个扇区，下面的菜不单独出现' }) : null,
+        oneBtn,
         el('span', { class: 'cat-count', text: asOne ? g.items.length + ' 道' : onCount + '/' + g.items.length }),
       ]);
 
@@ -139,8 +180,8 @@
       title: cat.name + '（' + count + ' 道菜）',
       items: [
         cat.groupAsOne
-          ? { icon: '📋', text: '改成「按菜品」上转盘', hint: '每道菜单独一个扇区', value: 'mode-items' }
-          : { icon: '🎯', text: '改成「整个大类」上转盘', hint: '只占一个扇区', value: 'mode-one' },
+          ? { icon: '📋', text: '改成按菜品上转盘', hint: '每道菜单独一个位置', value: 'mode-items' }
+          : { icon: '🎯', text: '整个大类加进转盘', hint: '只占一个位置', value: 'mode-one' },
         { icon: '✏️', text: '重命名这个大类', value: 'rename' },
         { icon: '➕', text: '往这个大类里加菜', hint: '一行一个', value: 'add' },
         { icon: '🎯', text: '只转这个大类里的菜', value: 'solo' },
@@ -148,8 +189,8 @@
       ],
     }).then(function (v) {
       if (v === 'mode-one') {
-        S.setCategoryMode(id, true);
-        UI.toast('「' + cat.name + '」改成整体上盘：转盘上只占一个扇区', 'ok', 3000);
+        S.enterCategoryAsOne(id);
+        UI.toast('「' + cat.name + '」整个加进转盘了，占一个位置', 'ok', 3000);
       } else if (v === 'mode-items') {
         S.setCategoryMode(id, false);
         UI.toast('「' + cat.name + '」改回按菜品上盘', 'ok');
@@ -712,9 +753,19 @@
     els.setConfetti.checked = !!S.settings.confetti;
     els.setDuration.value = S.settings.duration;
     els.setDurationVal.textContent = Number(S.settings.duration).toFixed(1) + 's';
-    if (location.protocol === 'file:') {
-      els.setProxy.disabled = true;
+    /*
+     * 「通过本地代理请求」只对「浏览器 + npm run serve」这一种用法有意义。
+     * 本地打开的单文件（file:）和安卓原生壳里都没有那个代理服务器，
+     * 勾上只会把请求打到 Capacitor 自己的静态服务器上、拿回一张 HTML 首页，
+     * 报错看起来像「接口返回的不是 JSON: <!doctype html>…」。所以这两种情况直接禁掉。
+     */
+    var proxyUsable = location.protocol !== 'file:' && !isNativeShell();
+    els.setProxy.disabled = !proxyUsable;
+    if (!proxyUsable) {
       els.setProxy.checked = false;
+      els.setProxy.parentNode.title = location.protocol === 'file:'
+        ? '本地打开的单文件没有代理服务器，用不了这一项'
+        : 'App 版走原生网络请求，本来就没有跨域问题，用不到这一项';
       if (v.useProxy) S.setVision({ useProxy: false });
     }
     renderStats();
@@ -1027,11 +1078,7 @@
 
     // 安卓原生壳里 WebView 是 edge-to-edge 的，而 env(safe-area-inset-top) 常常是 0，
     // 顶栏会被状态栏压住。打上这个 class 后 CSS 会给一个保底的安全区高度。
-    try {
-      var cap = global.Capacitor;
-      var isNative = !!(cap && ((cap.isNativePlatform && cap.isNativePlatform()) || cap.isNative));
-      if (isNative) document.documentElement.classList.add('is-native');
-    } catch (e) { /* 不是原生壳就算了 */ }
+    if (isNativeShell()) document.documentElement.classList.add('is-native');
 
     wheel = new W.Wheel($('wheel'));
     W.Sound.enabled = !!S.settings.sound;

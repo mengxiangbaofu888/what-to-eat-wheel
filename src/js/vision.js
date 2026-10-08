@@ -146,7 +146,24 @@
       };
       if (!payload.model) throw new Error('还没有填模型名，去「设置」里填一下');
 
-      var useProxy = !!v.useProxy && global.location && global.location.protocol !== 'file:';
+      /*
+       * 要不要走本地代理。
+       *
+       * 「通过本地代理请求」是给浏览器 + `npm run serve` 用的：浏览器的 CORS 会拦住
+       * 直连第三方接口，绕本地服务器转发就没事。
+       *
+       * 但在安卓原生壳（Capacitor）里根本没有那个本地服务器——WebView 自己跑在一个
+       * https://localhost 上，于是 '/api/vision' 这种相对路径会打到 Capacitor 的
+       * 静态资源服务器上，被 SPA 兜底规则返回成 index.html。
+       * 用户看到的报错就是「接口返回的不是 JSON: <!doctype html> ... viewport-fit=cover ...」，
+       * 而那串 HTML 其实就是应用自己的首页。
+       *
+       * 所以原生壳里必须无视这个开关（直连不受 CORS 限制，因为走的是原生网络栈）。
+       */
+      var nativeShell = !!(global.Capacitor && (
+        (global.Capacitor.isNativePlatform && global.Capacitor.isNativePlatform()) || global.Capacitor.isNative
+      ));
+      var useProxy = !!v.useProxy && !nativeShell && global.location && global.location.protocol !== 'file:';
       if (useProxy) {
         return postDirect('/api/vision', { 'Content-Type': 'application/json' }, {
           baseUrl: v.baseUrl, apiKey: v.apiKey, model: v.model, payload: payload,

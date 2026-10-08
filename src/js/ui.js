@@ -215,12 +215,22 @@
     if (!toastWrap) init();
     var node = el('div', { class: 'toast' + (type ? ' ' + type : ''), text: message });
     toastWrap.appendChild(node);
-    setTimeout(function () {
+
+    // 点一下就能关掉：报错信息有时候很长，盖着界面挺烦
+    var closed = false;
+    var timer = null;
+    function dismiss() {
+      if (closed) return;
+      closed = true;
+      if (timer) clearTimeout(timer);
       node.style.transition = 'opacity .3s, transform .3s';
       node.style.opacity = '0';
       node.style.transform = 'translateY(8px)';
       setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 320);
-    }, ms || (type === 'err' ? 4200 : 2200));
+    }
+    node.addEventListener('click', dismiss);
+    node.title = '点一下关掉';
+    timer = setTimeout(dismiss, ms || (type === 'err' ? 4200 : 2200));
   }
 
   /* ------------------------------ 撒花 ------------------------------ */

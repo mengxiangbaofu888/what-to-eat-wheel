@@ -404,16 +404,40 @@ input[type='checkbox']:indeterminate::after {
 :root[data-theme='light'] .cat-head { background: rgba(0, 0, 0, 0.03); }
 .cat-name { font-weight: 700; font-size: 13.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 「整体」标记：这个大类在转盘上只占一个扇区，下面的菜不单独出现 */
-.cat-tag {
+/*
+ * 「整体」按钮：把整个大类一键放进转盘，占一个位置。
+ *
+ * 之前这个功能藏在 ⋯ 菜单里、还要再勾一次复选框，用户找不到也说太绕。
+ * 现在做成一直可见的胶囊按钮：未启用是灰描边，启用后是绿色实心带 ✓。
+ * 状态和操作合一——看一眼知道现在是不是整体，点一下就切过去。
+ */
+.one-btn {
   flex: 0 0 auto;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
-  color: #073b2c;
-  background: linear-gradient(135deg, var(--ok), #7ceec4);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 9px;
+  min-height: 26px;
   border-radius: 999px;
-  padding: 2px 7px;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, border-color 0.16s, transform 0.1s;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
 }
-:root[data-theme='light'] .cat-tag { color: #fff; background: linear-gradient(135deg, #0aa87c, #0d9e73); }
+.one-btn:active { transform: scale(0.94); }
+.one-btn-icon { font-size: 11px; font-weight: 800; }
+.one-btn.on {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--ok), #7ceec4);
+  color: #073b2c;
+  box-shadow: 0 2px 8px rgba(6, 214, 160, 0.35);
+}
+:root[data-theme='light'] .one-btn.on { background: linear-gradient(135deg, #0aa87c, #0d9e73); color: #fff; }
 
 .cat-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .chev { transition: transform 0.2s; color: var(--text-dim); font-size: 11px; }
@@ -542,11 +566,18 @@ input[type='checkbox']:indeterminate::after {
   color: #fff;
   border: 1px solid var(--line);
   padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  max-width: 86vw;
+  border-radius: 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: min(86vw, 460px);
+  max-height: 40vh;
+  overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   animation: toastIn 0.22s ease-out;
+  /* 外层 wrap 是 pointer-events:none（不挡操作），但提示本身要能点一下关掉 */
+  pointer-events: auto;
+  cursor: pointer;
+  word-break: break-word;
 }
 .toast.err { background: rgba(120, 20, 45, 0.96); }
 .toast.ok { background: rgba(6, 90, 70, 0.96); }

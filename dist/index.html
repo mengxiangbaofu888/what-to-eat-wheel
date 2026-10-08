@@ -414,16 +414,40 @@ input[type='checkbox']:indeterminate::after {
 :root[data-theme='light'] .cat-head { background: rgba(0, 0, 0, 0.03); }
 .cat-name { font-weight: 700; font-size: 13.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 「整体」标记：这个大类在转盘上只占一个扇区，下面的菜不单独出现 */
-.cat-tag {
+/*
+ * 「整体」按钮：把整个大类一键放进转盘，占一个位置。
+ *
+ * 之前这个功能藏在 ⋯ 菜单里、还要再勾一次复选框，用户找不到也说太绕。
+ * 现在做成一直可见的胶囊按钮：未启用是灰描边，启用后是绿色实心带 ✓。
+ * 状态和操作合一——看一眼知道现在是不是整体，点一下就切过去。
+ */
+.one-btn {
   flex: 0 0 auto;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
-  color: #073b2c;
-  background: linear-gradient(135deg, var(--ok), #7ceec4);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 9px;
+  min-height: 26px;
   border-radius: 999px;
-  padding: 2px 7px;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, border-color 0.16s, transform 0.1s;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
 }
-:root[data-theme='light'] .cat-tag { color: #fff; background: linear-gradient(135deg, #0aa87c, #0d9e73); }
+.one-btn:active { transform: scale(0.94); }
+.one-btn-icon { font-size: 11px; font-weight: 800; }
+.one-btn.on {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--ok), #7ceec4);
+  color: #073b2c;
+  box-shadow: 0 2px 8px rgba(6, 214, 160, 0.35);
+}
+:root[data-theme='light'] .one-btn.on { background: linear-gradient(135deg, #0aa87c, #0d9e73); color: #fff; }
 
 .cat-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .chev { transition: transform 0.2s; color: var(--text-dim); font-size: 11px; }
@@ -552,11 +576,18 @@ input[type='checkbox']:indeterminate::after {
   color: #fff;
   border: 1px solid var(--line);
   padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  max-width: 86vw;
+  border-radius: 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: min(86vw, 460px);
+  max-height: 40vh;
+  overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   animation: toastIn 0.22s ease-out;
+  /* 外层 wrap 是 pointer-events:none（不挡操作），但提示本身要能点一下关掉 */
+  pointer-events: auto;
+  cursor: pointer;
+  word-break: break-word;
 }
 .toast.err { background: rgba(120, 20, 45, 0.96); }
 .toast.ok { background: rgba(6, 90, 70, 0.96); }
@@ -1438,6 +1469,30 @@ input[type='checkbox']:indeterminate::after {
       save(); emit();
     },
 
+    /**
+     * 一步到位：把这个大类切成「整体」并立刻放进转盘。
+     *
+     * 单独给一个方法，是因为「先切模式、再勾上盘」是两步，
+     * 而用户点「整体」按钮时想要的是一步就看到转盘上多了一个位置。
+     */
+    enterCategoryAsOne: function (catId) {
+      var cat = api.findCategory(catId);
+      if (!cat) return;
+      cat.groupAsOne = true;
+      cat.enabled = true;
+      save(); emit();
+    },
+
+    /** 批量勾选这些菜品；把它们所属的大类退出「整体」模式，否则它们不会生效 */
+    setManyEntries: function (ids, catId, on) {
+      var cat = catId ? api.findCategory(catId) : null;
+      if (cat && cat.groupAsOne && on) cat.groupAsOne = false;
+      var set = {};
+      (ids || []).forEach(function (id) { set[id] = 1; });
+      data.items.forEach(function (i) { if (set[i.id]) i.enabled = !!on; });
+      save(); emit();
+    },
+
     /** 整体模式下，这个大类要不要上盘 */
     setCategoryEnabled: function (catId, on) {
       var cat = api.findCategory(catId);
@@ -2242,7 +2297,24 @@ input[type='checkbox']:indeterminate::after {
       };
       if (!payload.model) throw new Error('还没有填模型名，去「设置」里填一下');
 
-      var useProxy = !!v.useProxy && global.location && global.location.protocol !== 'file:';
+      /*
+       * 要不要走本地代理。
+       *
+       * 「通过本地代理请求」是给浏览器 + `npm run serve` 用的：浏览器的 CORS 会拦住
+       * 直连第三方接口，绕本地服务器转发就没事。
+       *
+       * 但在安卓原生壳（Capacitor）里根本没有那个本地服务器——WebView 自己跑在一个
+       * https://localhost 上，于是 '/api/vision' 这种相对路径会打到 Capacitor 的
+       * 静态资源服务器上，被 SPA 兜底规则返回成 index.html。
+       * 用户看到的报错就是「接口返回的不是 JSON: <!doctype html> ... viewport-fit=cover ...」，
+       * 而那串 HTML 其实就是应用自己的首页。
+       *
+       * 所以原生壳里必须无视这个开关（直连不受 CORS 限制，因为走的是原生网络栈）。
+       */
+      var nativeShell = !!(global.Capacitor && (
+        (global.Capacitor.isNativePlatform && global.Capacitor.isNativePlatform()) || global.Capacitor.isNative
+      ));
+      var useProxy = !!v.useProxy && !nativeShell && global.location && global.location.protocol !== 'file:';
       if (useProxy) {
         return postDirect('/api/vision', { 'Content-Type': 'application/json' }, {
           baseUrl: v.baseUrl, apiKey: v.apiKey, model: v.model, payload: payload,
@@ -2496,12 +2568,22 @@ input[type='checkbox']:indeterminate::after {
     if (!toastWrap) init();
     var node = el('div', { class: 'toast' + (type ? ' ' + type : ''), text: message });
     toastWrap.appendChild(node);
-    setTimeout(function () {
+
+    // 点一下就能关掉：报错信息有时候很长，盖着界面挺烦
+    var closed = false;
+    var timer = null;
+    function dismiss() {
+      if (closed) return;
+      closed = true;
+      if (timer) clearTimeout(timer);
       node.style.transition = 'opacity .3s, transform .3s';
       node.style.opacity = '0';
       node.style.transform = 'translateY(8px)';
       setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 320);
-    }, ms || (type === 'err' ? 4200 : 2200));
+    }
+    node.addEventListener('click', dismiss);
+    node.title = '点一下关掉';
+    timer = setTimeout(dismiss, ms || (type === 'err' ? 4200 : 2200));
   }
 
   /* ------------------------------ 撒花 ------------------------------ */
@@ -2587,6 +2669,14 @@ input[type='checkbox']:indeterminate::after {
 
   function $(id) { return document.getElementById(id); }
 
+  /** 是不是跑在安卓原生壳（Capacitor）里 */
+  function isNativeShell() {
+    try {
+      var c = global.Capacitor;
+      return !!(c && ((c.isNativePlatform && c.isNativePlatform()) || c.isNative));
+    } catch (e) { return false; }
+  }
+
   /* ============================== 主题 ============================== */
 
   var media = global.matchMedia ? global.matchMedia('(prefers-color-scheme: light)') : null;
@@ -2639,15 +2729,48 @@ input[type='checkbox']:indeterminate::after {
       var onCount = g.items.filter(function (i) { return i.enabled; }).length;
       var allOn = g.items.length > 0 && onCount === g.items.length;
       var someOn = onCount > 0 && !allOn;
-      var asOne = !!g.groupAsOne;   // 整个大类只上一个扇区
+      var asOne = !!g.groupAsOne;           // 这个大类是不是「整体占一个位置」
+      var oneOn = asOne && g.enabled !== false;
 
-      var headBox = el('input', { type: 'checkbox', checked: asOne ? g.enabled !== false : allOn });
+      var headBox = el('input', { type: 'checkbox', checked: asOne ? oneOn : allOn });
       headBox.indeterminate = asOne ? false : someOn;
       headBox.addEventListener('click', function (e) {
         e.stopPropagation();
-        if (asOne) S.setCategoryEnabled(g.id, g.enabled === false);   // 整体模式：只管这一类上不上
-        else S.setManyEnabled(g.items.map(function (i) { return i.id; }), !allOn);
+        if (asOne) S.setCategoryEnabled(g.id, !oneOn);
+        else S.setManyEntries(g.items.map(function (i) { return i.id; }), g.id, !allOn);
       });
+
+      /*
+       * 「整体」按钮：点一下就**直接把整个大类放进转盘**，占一个位置。
+       *
+       * 之前这个操作藏在 ⋯ 菜单里（先切模式、再勾复选框，两步），用户找不到也说太绕。
+       * 现在它是一个一直可见的胶囊按钮：
+       *   没启用 → 灰色描边「整体」    点一下 = 这一类整体进转盘
+       *   已启用 → 绿色实心「整体 ✓」  点一下 = 从转盘撤下
+       * 一件事一步到位，状态也一眼能看出来。
+       */
+      var oneBtn = null;
+      if (!g.virtual) {
+        oneBtn = el('button', {
+          class: 'one-btn' + (oneOn ? ' on' : ''),
+          title: oneOn
+            ? '「' + g.name + '」整个在转盘上占一个位置，点一下撤下'
+            : '把「' + g.name + '」整个加进转盘，只占一个位置（下面的菜不单独出现）',
+          onclick: function (e) {
+            e.stopPropagation();
+            if (oneOn) {
+              S.setCategoryMode(g.id, false);       // 退出整体上盘，回到按菜品
+              UI.toast('「' + g.name + '」已从转盘撤下', 'ok');
+            } else {
+              S.enterCategoryAsOne(g.id);           // 一步：切成整体 + 上盘
+              UI.toast('「' + g.name + '」整个加进转盘了，占一个位置', 'ok', 3000);
+            }
+          },
+        }, [
+          el('span', { class: 'one-btn-icon', text: oneOn ? '✓' : '＋' }),
+          el('span', { text: '整体' }),
+        ]);
+      }
 
       var head = el('div', { class: 'cat-head', onclick: function (e) {
         if (e.target.closest('button') || e.target === headBox) return;
@@ -2655,7 +2778,7 @@ input[type='checkbox']:indeterminate::after {
       } }, [
         headBox,
         el('span', { class: 'cat-name', text: g.name }),
-        asOne ? el('span', { class: 'cat-tag', text: '整体', title: '整个大类在转盘上只占一个扇区，下面的菜不单独出现' }) : null,
+        oneBtn,
         el('span', { class: 'cat-count', text: asOne ? g.items.length + ' 道' : onCount + '/' + g.items.length }),
       ]);
 
@@ -2708,8 +2831,8 @@ input[type='checkbox']:indeterminate::after {
       title: cat.name + '（' + count + ' 道菜）',
       items: [
         cat.groupAsOne
-          ? { icon: '📋', text: '改成「按菜品」上转盘', hint: '每道菜单独一个扇区', value: 'mode-items' }
-          : { icon: '🎯', text: '改成「整个大类」上转盘', hint: '只占一个扇区', value: 'mode-one' },
+          ? { icon: '📋', text: '改成按菜品上转盘', hint: '每道菜单独一个位置', value: 'mode-items' }
+          : { icon: '🎯', text: '整个大类加进转盘', hint: '只占一个位置', value: 'mode-one' },
         { icon: '✏️', text: '重命名这个大类', value: 'rename' },
         { icon: '➕', text: '往这个大类里加菜', hint: '一行一个', value: 'add' },
         { icon: '🎯', text: '只转这个大类里的菜', value: 'solo' },
@@ -2717,8 +2840,8 @@ input[type='checkbox']:indeterminate::after {
       ],
     }).then(function (v) {
       if (v === 'mode-one') {
-        S.setCategoryMode(id, true);
-        UI.toast('「' + cat.name + '」改成整体上盘：转盘上只占一个扇区', 'ok', 3000);
+        S.enterCategoryAsOne(id);
+        UI.toast('「' + cat.name + '」整个加进转盘了，占一个位置', 'ok', 3000);
       } else if (v === 'mode-items') {
         S.setCategoryMode(id, false);
         UI.toast('「' + cat.name + '」改回按菜品上盘', 'ok');
@@ -3281,9 +3404,19 @@ input[type='checkbox']:indeterminate::after {
     els.setConfetti.checked = !!S.settings.confetti;
     els.setDuration.value = S.settings.duration;
     els.setDurationVal.textContent = Number(S.settings.duration).toFixed(1) + 's';
-    if (location.protocol === 'file:') {
-      els.setProxy.disabled = true;
+    /*
+     * 「通过本地代理请求」只对「浏览器 + npm run serve」这一种用法有意义。
+     * 本地打开的单文件（file:）和安卓原生壳里都没有那个代理服务器，
+     * 勾上只会把请求打到 Capacitor 自己的静态服务器上、拿回一张 HTML 首页，
+     * 报错看起来像「接口返回的不是 JSON: <!doctype html>…」。所以这两种情况直接禁掉。
+     */
+    var proxyUsable = location.protocol !== 'file:' && !isNativeShell();
+    els.setProxy.disabled = !proxyUsable;
+    if (!proxyUsable) {
       els.setProxy.checked = false;
+      els.setProxy.parentNode.title = location.protocol === 'file:'
+        ? '本地打开的单文件没有代理服务器，用不了这一项'
+        : 'App 版走原生网络请求，本来就没有跨域问题，用不到这一项';
       if (v.useProxy) S.setVision({ useProxy: false });
     }
     renderStats();
@@ -3596,11 +3729,7 @@ input[type='checkbox']:indeterminate::after {
 
     // 安卓原生壳里 WebView 是 edge-to-edge 的，而 env(safe-area-inset-top) 常常是 0，
     // 顶栏会被状态栏压住。打上这个 class 后 CSS 会给一个保底的安全区高度。
-    try {
-      var cap = global.Capacitor;
-      var isNative = !!(cap && ((cap.isNativePlatform && cap.isNativePlatform()) || cap.isNative));
-      if (isNative) document.documentElement.classList.add('is-native');
-    } catch (e) { /* 不是原生壳就算了 */ }
+    if (isNativeShell()) document.documentElement.classList.add('is-native');
 
     wheel = new W.Wheel($('wheel'));
     W.Sound.enabled = !!S.settings.sound;
