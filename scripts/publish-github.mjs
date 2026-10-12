@@ -49,12 +49,36 @@ const HEADERS = {
   'X-GitHub-Api-Version': '2022-11-28',
 };
 
+/**
+ * 有些网络环境下（校园网 / 带中间人代理的网）TLS 证书链验证不上，
+ * 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE。Node 官方的解法是用系统证书库：
+ *   $env:NODE_OPTIONS='--use-system-ca'
+ * 注意别用 NODE_TLS_REJECT_UNAUTHORIZED=0 —— 那等于关掉证书校验，
+ * GH_TOKEN 就可能被中间人看光。这个函数把这类错误翻译成一句能直接照做的提示。
+ */
+function tlsHint(e) {
+  const cause = (e && e.cause) || {};
+  const code = String(cause.code || '');
+  const msg = String(cause.message || '');
+  if (code.includes('UNABLE_TO_VERIFY') || msg.includes('unable to verify') || code === 'CERT_HAS_EXPIRED') {
+    return 'TLS 证书验证失败（' + (code || msg) + '）。这个网络环境多半装了中间人证书，用系统证书库跑一次就行：\n'
+      + "     PowerShell:  $env:NODE_OPTIONS='--use-system-ca'; node scripts/publish-github.mjs\n"
+      + '   千万不要用 NODE_TLS_REJECT_UNAUTHORIZED=0 —— 那会关掉证书校验，Token 可能被中间人截走。';
+  }
+  return null;
+}
+
 async function api(method, path, body, extraHeaders) {
-  const res = await fetch(API + path, {
-    method,
-    headers: { ...HEADERS, ...(body ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(API + path, {
+      method,
+      headers: { ...HEADERS, ...(body ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    throw new Error(tlsHint(e) || e.message);
+  }
   const text = await res.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* 非 JSON */ }
@@ -359,11 +383,17 @@ if (WITH_RELEASE) {
       continue;
     }
     const buf = readFileSync(asset.file);
-    const res = await fetch(`${UPLOADS}/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(asset.name)}`, {
-      method: 'POST',
-      headers: { ...HEADERS, 'Content-Type': asset.type, 'Content-Length': String(buf.length) },
-      body: buf,
-    });
+    let res;
+    try {
+      res = await fetch(`${UPLOADS}/repos/${OWNER}/${REPO}/releases/${release.id}/assets?name=${encodeURIComponent(asset.name)}`, {
+        method: 'POST',
+        headers: { ...HEADERS, 'Content-Type': asset.type, 'Content-Length': String(buf.length) },
+        body: buf,
+      });
+    } catch (e) {
+      console.log(`   ❌ ${asset.name} 上传失败：${tlsHint(e) || e.message}`);
+      continue;
+    }
     if (res.ok) {
       console.log(`   ✅ ${asset.name}  (${(buf.length / 1024 / 1024).toFixed(2)} MB)`);
     } else if (res.status === 422) {
