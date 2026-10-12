@@ -27,6 +27,12 @@ release/
 .chrome-profile*/
 .edge-profile*/
 
+# 参考资料里别人项目的产物（版权不在我们这边，只留本地做对照，不上传）
+# 说明文件 reference/README.md 是本项目自己写的，照常提交
+reference/吃啥好呢.html
+reference/吃啥好呢.apk
+reference/吃啥好呢-使用说明.txt
+
 # 杂项
 *.log
 .commit-*.txt

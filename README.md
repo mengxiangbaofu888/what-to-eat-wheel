@@ -173,7 +173,9 @@ what-to-eat-wheel-20261005/
 ├── android/                  Capacitor 安卓工程
 ├── docs/
 │   ├── 使用说明.md            面向使用者的说明
+│   ├── 更新日志.md
 │   └── screenshots/
+├── reference/                最初参考的那个项目的产物（只留本地对照，不上传）
 └── capacitor.config.json
 ```
 
